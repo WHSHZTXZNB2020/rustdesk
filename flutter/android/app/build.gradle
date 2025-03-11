@@ -104,6 +104,6 @@ flutter {
 dependencies {
     implementation "androidx.media:media:1.6.0"
     implementation 'com.github.getActivity:XXPermissions:18.5'
-    implementation("org.jetbrains.kotlin:kotlin-stdlib") { version { strictly("1.9.10") } }
+    implementation("org.jetbrains.kotlin:kotlin-stdlib") { version { strictly("1.8.0") } }
     implementation 'com.caverock:androidsvg-aar:1.4'
 }
