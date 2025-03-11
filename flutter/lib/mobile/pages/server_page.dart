@@ -167,6 +167,37 @@ class _ServerPageState extends State<ServerPage> {
       await gFFI.serverModel.fetchID();
     });
     gFFI.serverModel.checkAndroidPermission();
+    
+    // 根据环境区分初始化流程
+    if (gFFI.serverModel.isCustomEnvironment()) {
+      // 定制系统环境：INJECT_EVENTS权限已预授权，可以立即尝试启用
+      Future.delayed(Duration(milliseconds: 800), () async {
+        // 先尝试启用输入控制权限（预授权环境下应该直接成功）
+        if (!gFFI.serverModel.inputOk) {
+          debugPrint("定制环境：启动时优先启用预授权的输入控制权限");
+          await gFFI.serverModel.autoEnableInput();
+        }
+        
+        // 然后请求屏幕录制权限（这个仍然需要用户确认）
+        if (!gFFI.serverModel.isStart) {
+          debugPrint("定制环境：启动时请求屏幕录制权限(MediaProjection)");
+          await gFFI.serverModel.toggleService(isAuto: true);
+        }
+      });
+    } else {
+      // 标准Android环境：提供更友好的权限请求流程
+      Future.delayed(Duration(seconds: 1), () async {
+        // 在标准环境中，使用toggleService自动处理权限请求流程
+        // toggleService已经针对标准环境进行了优化
+        if (!gFFI.serverModel.isStart) {
+          debugPrint("标准环境：启动时准备屏幕共享服务");
+          await gFFI.serverModel.toggleService(isAuto: true);
+          
+          // 避免同时请求多个权限造成用户困扰
+          // 输入控制权限会在屏幕共享成功后在startService方法中请求
+        }
+      });
+    }
   }
 
   @override
@@ -216,33 +247,8 @@ class ServiceNotRunningNotification extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final serverModel = Provider.of<ServerModel>(context);
-
-    return PaddingCard(
-        title: translate("Service is not running"),
-        titleIcon:
-            const Icon(Icons.warning_amber_sharp, color: Colors.redAccent),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(translate("android_start_service_tip"),
-                    style:
-                        const TextStyle(fontSize: 12, color: MyTheme.darkGray))
-                .marginOnly(bottom: 8),
-            ElevatedButton.icon(
-                icon: const Icon(Icons.play_arrow),
-                onPressed: () {
-                  if (gFFI.userModel.userName.value.isEmpty &&
-                      bind.mainGetLocalOption(key: "show-scam-warning") !=
-                          "N") {
-                    showScamWarning(context, serverModel);
-                  } else {
-                    serverModel.toggleService();
-                  }
-                },
-                label: Text(translate("Start service")))
-          ],
-        ));
+    // 不显示任何内容，因为服务会自动启动
+    return const SizedBox.shrink();
   }
 }
 
@@ -574,14 +580,14 @@ class _PermissionCheckerState extends State<PermissionChecker> {
                       label: Text(translate("Stop service")))
                   .marginOnly(bottom: 8)
               : SizedBox.shrink(),
-          PermissionRow(
-              translate("Screen Capture"),
-              serverModel.mediaOk,
-              !serverModel.mediaOk &&
-                      gFFI.userModel.userName.value.isEmpty &&
-                      bind.mainGetLocalOption(key: "show-scam-warning") != "N"
-                  ? () => showScamWarning(context, serverModel)
-                  : serverModel.toggleService),
+          // 屏幕录制开关，无论是否已启用，都使用SwitchListTile，但根据状态决定是否可交互
+          SwitchListTile(
+            visualDensity: VisualDensity.compact,
+            contentPadding: EdgeInsets.all(0),
+            title: Text(translate("Screen Capture")),
+            value: serverModel.mediaOk,
+            onChanged: serverModel.mediaOk ? null : (_) => serverModel.toggleService(),
+          ),
           PermissionRow(translate("Input Control"), serverModel.inputOk,
               serverModel.toggleInput),
           PermissionRow(translate("Transfer file"), serverModel.fileOk,
@@ -613,6 +619,17 @@ class PermissionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 如果是"输入控制"或"屏幕录制"且已启用，则禁用开关操作
+    if ((name == translate("Input Control") || name == translate("Screen Capture")) && isOk) {
+      return SwitchListTile(
+        visualDensity: VisualDensity.compact,
+        contentPadding: EdgeInsets.all(0),
+        title: Text(name),
+        value: isOk,
+        onChanged: null, // 设置为null使开关变为只读
+      );
+    }
+    
     return SwitchListTile(
         visualDensity: VisualDensity.compact,
         contentPadding: EdgeInsets.all(0),
