@@ -102,6 +102,36 @@ Future<void> main(List<String> args) async {
     }
     runMainApp(true);
   }
+
+  // 确保在应用完全启动后自动检查权限
+  Future.delayed(Duration(seconds: 3), () {
+    if (isAndroid && gFFI.serverModel != null) {
+      final isCustomEnv = gFFI.serverModel.isCustomEnvironment();
+      debugPrint("应用完全启动后检查状态 (${isCustomEnv ? '定制环境' : '标准环境'})");
+      
+      if (isCustomEnv) {
+        // 定制环境：可以更激进地请求权限
+        // 先检查输入控制权限（定制系统预授权）
+        if (!gFFI.serverModel.inputOk) {
+          debugPrint("定制环境备用：输入控制权限未获取，尝试启用预授权");
+          gFFI.serverModel.autoEnableInput();
+        }
+        
+        // 再检查屏幕共享服务
+        if (!gFFI.serverModel.isStart) {
+          debugPrint("定制环境备用：屏幕共享服务未启动，尝试启动");
+          gFFI.serverModel.toggleService(isAuto: true);
+        }
+      } else {
+        // 标准环境：更谨慎地处理权限
+        // 只在屏幕共享服务运行但没有输入控制权限时进行检查
+        if (gFFI.serverModel.isStart && !gFFI.serverModel.inputOk) {
+          debugPrint("标准环境备用：屏幕共享已运行，检查输入控制权限");
+          gFFI.serverModel.autoEnableInput();
+        }
+      }
+    }
+  });
 }
 
 Future<void> initEnv(String appType) async {
