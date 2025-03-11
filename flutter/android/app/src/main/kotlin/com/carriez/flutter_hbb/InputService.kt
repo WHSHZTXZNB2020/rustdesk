@@ -28,8 +28,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import hbb.MessageOuterClass.KeyEvent
 import hbb.MessageOuterClass.KeyboardMode
-import hbb.KeyEventConverter
 import kotlin.concurrent.thread
+import java.lang.reflect.Method
 
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
@@ -55,6 +55,9 @@ const val TOUCH_PAN_END = 6
 const val WHEEL_STEP = 120
 const val WHEEL_DURATION = 50L
 const val LONG_TAP_DELAY = 200L
+
+// 定义InputManager的常量，以防止编译错误
+private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 
 class InputService(context: Context) {
 
@@ -270,7 +273,7 @@ class InputService(context: Context) {
             
             when (keyEvent.mode) {
                 KeyboardMode.Legacy -> {
-                    val keyCode = keyEvent.keycode
+                    val keyCode = keyEvent.keycode.toInt()
                     val down = keyEvent.down
                     
                     // 处理文本输入
@@ -297,7 +300,8 @@ class InputService(context: Context) {
                     }
                     
                     // 处理普通按键
-                    val keyCode = KeyEventConverter.convertAndroidKeyCode(keyEvent.keycode)
+                    // 由于KeyEventConverter可能不可用，改为直接使用keycode
+                    val keyCode = keyEvent.keycode.toInt()
                     if (keyEvent.down) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
@@ -312,7 +316,7 @@ class InputService(context: Context) {
                     }
                     
                     // 处理普通按键
-                    val keyCode = keyEvent.keycode
+                    val keyCode = keyEvent.keycode.toInt()
                     if (keyEvent.down) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
@@ -332,7 +336,16 @@ class InputService(context: Context) {
     // Helper methods for event injection
     
     private fun injectEvent(event: InputEvent): Boolean {
-        return inputManager?.injectInputEvent(event, InputManager.INJECT_INPUT_EVENT_MODE_ASYNC) ?: false
+        try {
+            // 由于无法使用 InputManager.injectInputEvent 方法，我们使用反射来调用它
+            inputManager?.let { manager ->
+                val method = InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.java)
+                return (method.invoke(manager, event, INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error injecting event via reflection: ${e.message}")
+        }
+        return false
     }
     
     private fun injectMotionEvent(action: Int, x: Float, y: Float, isLongPress: Boolean = false): Boolean {
@@ -487,29 +500,9 @@ class InputService(context: Context) {
             }
         }
         
-        // 根据Android版本选择不同的处理方式
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Android 8.0+ 使用 Builder API
-            try {
-                arrayOf(
-                    KeyEventAndroid.Builder()
-                        .setAction(KeyEventAndroid.ACTION_DOWN)
-                        .setKeyCode(KeyEventAndroid.KEYCODE_UNKNOWN)
-                        .setUnicodeChar(code)
-                        .build(),
-                    KeyEventAndroid.Builder()
-                        .setAction(KeyEventAndroid.ACTION_UP)
-                        .setKeyCode(KeyEventAndroid.KEYCODE_UNKNOWN)
-                        .build()
-                )
-            } catch (e: Exception) {
-                Log.e(logTag, "Error creating key event with Builder: ${e.message}")
-                createFallbackKeyEvents(code)
-            }
-        } else {
-            // 低版本Android的备选实现
-            createFallbackKeyEvents(code)
-        }
+        // 只使用简单的方式，避免使用Builder
+        val time = SystemClock.uptimeMillis()
+        return createFallbackKeyEvents(code)
     }
     
     private fun createFallbackKeyEvents(code: Int): Array<KeyEventAndroid> {
