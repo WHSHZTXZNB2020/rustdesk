@@ -59,6 +59,11 @@ const val LONG_TAP_DELAY = 200L
 // 定义InputManager的常量，以防止编译错误
 private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 
+// 定义KeyboardMode的常量
+private val LEGACY_MODE = KeyboardMode.Legacy.number
+private val TRANSLATE_MODE = KeyboardMode.Translate.number
+private val MAP_MODE = KeyboardMode.Map.number
+
 class InputService(context: Context) {
 
     companion object {
@@ -271,14 +276,15 @@ class InputService(context: Context) {
         try {
             val keyEvent = KeyEvent.parseFrom(input)
             
-            when (keyEvent.mode) {
-                KeyboardMode.Legacy -> {
-                    val keyCode = keyEvent.keycode.toInt()
-                    val down = keyEvent.down
+            when (keyEvent.getMode().number) {
+                LEGACY_MODE -> {
+                    // 使用getKeycode()方法获取键码
+                    val keyCode = keyEvent.getKeycode()
+                    val down = keyEvent.getDown()
                     
                     // 处理文本输入
-                    if (keyEvent.hasChr() && (down || keyEvent.press)) {
-                        val chr = keyEvent.chr
+                    if (keyEvent.hasChr() && (down || keyEvent.getPress())) {
+                        val chr = keyEvent.getChr()
                         if (chr != 0) {
                             injectText(String(Character.toChars(chr)))
                             return
@@ -292,32 +298,33 @@ class InputService(context: Context) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
                     }
                 }
-                KeyboardMode.Translate -> {
+                TRANSLATE_MODE -> {
                     // 处理文本输入
-                    if (keyEvent.hasSeq() && keyEvent.seq.isNotEmpty()) {
-                        injectText(keyEvent.seq)
+                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
+                        injectText(keyEvent.getSeq())
                         return
                     }
                     
                     // 处理普通按键
-                    // 由于KeyEventConverter可能不可用，改为直接使用keycode
-                    val keyCode = keyEvent.keycode.toInt()
-                    if (keyEvent.down) {
+                    // 使用getKeycode()方法获取键码
+                    val keyCode = keyEvent.getKeycode()
+                    if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
                     }
                 }
-                KeyboardMode.Map -> {
+                MAP_MODE -> {
                     // 处理文本输入
-                    if (keyEvent.hasSeq() && keyEvent.seq.isNotEmpty()) {
-                        injectText(keyEvent.seq)
+                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
+                        injectText(keyEvent.getSeq())
                         return
                     }
                     
                     // 处理普通按键
-                    val keyCode = keyEvent.keycode.toInt()
-                    if (keyEvent.down) {
+                    // 使用getKeycode()方法获取键码
+                    val keyCode = keyEvent.getKeycode()
+                    if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
@@ -325,7 +332,7 @@ class InputService(context: Context) {
                 }
                 else -> {
                     // Unsupported mode
-                    Log.e(logTag, "Unsupported keyboard mode: ${keyEvent.mode}")
+                    Log.e(logTag, "Unsupported keyboard mode: ${keyEvent.getMode()}")
                 }
             }
         } catch (e: Exception) {
