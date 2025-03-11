@@ -207,15 +207,18 @@ class MainActivity : FlutterActivity() {
                             }
                         } else {
                             Log.d(logTag, "Requesting INJECT_EVENTS permission")
+                            Log.e(logTag, "尝试申请INJECT_EVENTS权限")
                             requestInjectEventsPermission(this) { granted ->
                                 if (granted) {
                                     try {
                                         InputService(this)
+                                        Log.d(logTag, "INJECT_EVENTS权限获取成功，已初始化InputService")
                                     } catch (e: Exception) {
                                         Log.e(logTag, "Error initializing InputService after permission: ${e.message}")
                                     }
                                 } else {
                                     Log.d(logTag, "INJECT_EVENTS permission denied")
+                                    Log.e(logTag, "INJECT_EVENTS权限被拒绝")
                                 }
                                 activity.runOnUiThread {
                                     Companion.flutterMethodChannel?.invokeMethod(
