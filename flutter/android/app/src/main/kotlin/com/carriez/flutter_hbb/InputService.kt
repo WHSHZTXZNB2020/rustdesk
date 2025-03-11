@@ -278,8 +278,8 @@ class InputService(context: Context) {
             
             when (keyEvent.getMode().number) {
                 LEGACY_MODE -> {
-                    // 使用getKeycode()方法获取键码
-                    val keyCode = keyEvent.getKeycode()
+                    // 使用getChr()方法获取键码
+                    val keyCode = keyEvent.getChr()
                     val down = keyEvent.getDown()
                     
                     // 处理文本输入
@@ -306,8 +306,8 @@ class InputService(context: Context) {
                     }
                     
                     // 处理普通按键
-                    // 使用getKeycode()方法获取键码
-                    val keyCode = keyEvent.getKeycode()
+                    // 使用getChr()方法获取键码
+                    val keyCode = keyEvent.getChr()
                     if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
@@ -322,8 +322,8 @@ class InputService(context: Context) {
                     }
                     
                     // 处理普通按键
-                    // 使用getKeycode()方法获取键码
-                    val keyCode = keyEvent.getKeycode()
+                    // 使用getChr()方法获取键码
+                    val keyCode = keyEvent.getChr()
                     if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
