@@ -67,7 +67,8 @@ private val LEGACY_MODE = KeyboardMode.Legacy.number
 private val TRANSLATE_MODE = KeyboardMode.Translate.number
 private val MAP_MODE = KeyboardMode.Map.number
 
-class InputService : Service() {
+// InputService类用于处理输入事件
+class InputService : Service {
 
     companion object {
         var ctx: InputService? = null
@@ -95,21 +96,26 @@ class InputService : Service() {
     private var inputManager: InputManager? = null
     private lateinit var appContext: Context
     private lateinit var handler: Handler
-
-    // 无参构造函数
+    
+    // 提供公开的无参构造函数
     constructor() : super() {
         Log.d(logTag, "InputService created with default constructor")
     }
-
-    // 保留带参构造函数，但将其标记为私有
-    private constructor(context: Context) : super() {
+    
+    // 提供带Context参数的公开构造函数
+    constructor(context: Context) : super() {
+        Log.d(logTag, "InputService created with context constructor")
         initializeWithContext(context)
     }
-
+    
     override fun onCreate() {
         super.onCreate()
         Log.d(logTag, "InputService onCreate called")
-        initializeWithContext(applicationContext)
+        
+        // 如果还未初始化，则使用applicationContext初始化
+        if (!::appContext.isInitialized) {
+            initializeWithContext(applicationContext)
+        }
     }
 
     private fun initializeWithContext(context: Context) {
