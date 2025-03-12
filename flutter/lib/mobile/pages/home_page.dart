@@ -30,7 +30,7 @@ class HomePageState extends State<HomePage> {
   final List<PageShape> _pages = [];
   int _chatPageTabIndex = -1;
   bool get isChatPageCurrentTab => isAndroid
-      ? _selectedIndex == _chatPageTabIndex
+      ? _selectedIndex == _chatPageTabIndex && _chatPageTabIndex >= 0
       : false; // change this when ios have chat page
 
   void refreshPages() {
@@ -47,15 +47,26 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
+    
+    // 1. 服务页面（如果是安卓且不是仅出站模式）
+    if (isAndroid && !bind.isOutgoingOnly()) {
+      _pages.add(ServerPage());
+    }
+    
+    // 2. 连接页面（如果不是仅入站模式）
     if (!bind.isIncomingOnly()) {
       _pages.add(ConnectionPage(
         appBarActions: [],
       ));
     }
+    
+    // 3. 聊天页面（如果是安卓且不是仅出站模式）
     if (isAndroid && !bind.isOutgoingOnly()) {
       _chatPageTabIndex = _pages.length;
-      _pages.addAll([ChatPage(type: ChatPageType.mobileMain), ServerPage()]);
+      _pages.add(ChatPage(type: ChatPageType.mobileMain));
     }
+    
+    // 4. 设置页面（总是添加）
     _pages.add(SettingsPage());
   }
 
