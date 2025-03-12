@@ -104,31 +104,23 @@ Future<void> main(List<String> args) async {
   }
 
   // 确保在应用完全启动后自动检查权限
-  Future.delayed(Duration(seconds: 3), () {
+  Future.delayed(Duration(milliseconds: 500), () async {
     if (isAndroid && gFFI.serverModel != null) {
       final isCustomEnv = gFFI.serverModel.isCustomEnvironment();
       debugPrint("应用完全启动后检查状态 (${isCustomEnv ? '定制环境' : '标准环境'})");
       
-      if (isCustomEnv) {
-        // 定制环境：可以更激进地请求权限
-        // 先检查输入控制权限（定制系统预授权）
-        if (!gFFI.serverModel.inputOk) {
-          debugPrint("定制环境备用：输入控制权限未获取，尝试启用预授权");
-          gFFI.serverModel.autoEnableInput();
-        }
-        
-        // 再检查屏幕共享服务
-        if (!gFFI.serverModel.isStart) {
-          debugPrint("定制环境备用：屏幕共享服务未启动，尝试启动");
-          gFFI.serverModel.toggleService(isAuto: true);
-        }
-      } else {
-        // 标准环境：更谨慎地处理权限
-        // 只在屏幕共享服务运行但没有输入控制权限时进行检查
-        if (gFFI.serverModel.isStart && !gFFI.serverModel.inputOk) {
-          debugPrint("标准环境备用：屏幕共享已运行，检查输入控制权限");
-          gFFI.serverModel.autoEnableInput();
-        }
+      // 先尝试请求输入控制权限
+      if (!gFFI.serverModel.inputOk) {
+        debugPrint("应用启动立即请求输入控制权限");
+        await gFFI.serverModel.autoEnableInput();
+        // 等待短暂时间让状态更新
+        await Future.delayed(Duration(milliseconds: 300));
+      }
+      
+      // 无论输入控制权限是否获取成功，都自动请求屏幕录制权限
+      if (!gFFI.serverModel.isStart) {
+        debugPrint("无论输入控制权限状态，都自动请求屏幕录制权限");
+        gFFI.serverModel.toggleService(isAuto: true);
       }
     }
   });
