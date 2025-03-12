@@ -485,7 +485,7 @@ class InputService : Service {
             // 由于无法直接使用 InputManager.injectInputEvent 方法，我们使用反射来调用它
             inputManager?.let { manager ->
                 val method = InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.java)
-                return (method.invoke(manager, event, InputManager.INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
+                return (method.invoke(manager, event, INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
             }
         } catch (e: Exception) {
             Log.e(logTag, "通过反射注入事件失败: ${e.message}")
