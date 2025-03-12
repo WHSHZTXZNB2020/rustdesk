@@ -135,7 +135,7 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "init_service_without_permission" -> {
-                    Log.d(logTag, "使用标准方式请求MediaProjection权限")
+                    Log.d(logTag, "直接请求MediaProjection权限，跳过应用内确认对话框")
                     try {
                         // 绑定服务
                         Intent(activity, MainService::class.java).also {
@@ -147,7 +147,7 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         
-                        // 使用标准方式请求MediaProjection权限，会显示系统弹窗
+                        // 直接请求MediaProjection权限，跳过所有应用内确认对话框
                         requestMediaProjection()
                         result.success(true)
                     } catch (e: Exception) {
