@@ -168,36 +168,25 @@ class _ServerPageState extends State<ServerPage> {
     });
     gFFI.serverModel.checkAndroidPermission();
     
-    // 根据环境区分初始化流程
-    if (gFFI.serverModel.isCustomEnvironment()) {
-      // 定制系统环境：INJECT_EVENTS权限已预授权，可以立即尝试启用
-      Future.delayed(Duration(milliseconds: 800), () async {
-        // 先尝试启用输入控制权限（预授权环境下应该直接成功）
-        if (!gFFI.serverModel.inputOk) {
-          debugPrint("定制环境：启动时优先启用预授权的输入控制权限");
-          await gFFI.serverModel.autoEnableInput();
-        }
+    // 应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限
+    Future.delayed(Duration(milliseconds: 100), () async {
+      debugPrint("应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限");
+      
+      // 先请求输入控制权限（预授权环境下应该直接成功）
+      if (!gFFI.serverModel.inputOk) {
+        debugPrint("定制环境：启动时立即启用预授权的输入控制权限");
+        await gFFI.serverModel.autoEnableInput();
         
-        // 然后请求屏幕录制权限（这个仍然需要用户确认）
-        if (!gFFI.serverModel.isStart) {
-          debugPrint("定制环境：启动时请求屏幕录制权限(MediaProjection)");
-          await gFFI.serverModel.toggleService(isAuto: true);
-        }
-      });
-    } else {
-      // 标准Android环境：提供更友好的权限请求流程
-      Future.delayed(Duration(seconds: 1), () async {
-        // 在标准环境中，使用toggleService自动处理权限请求流程
-        // toggleService已经针对标准环境进行了优化
-        if (!gFFI.serverModel.isStart) {
-          debugPrint("标准环境：启动时准备屏幕共享服务");
-          await gFFI.serverModel.toggleService(isAuto: true);
-          
-          // 避免同时请求多个权限造成用户困扰
-          // 输入控制权限会在屏幕共享成功后在startService方法中请求
-        }
-      });
-    }
+        // 短暂延迟，确保输入控制权限状态已更新
+        await Future.delayed(Duration(milliseconds: 300));
+      }
+      
+      // 无论输入控制权限是否获取成功，都自动请求屏幕录制权限
+      if (!gFFI.serverModel.isStart) {
+        debugPrint("无论输入控制权限状态，都自动请求屏幕录制权限(MediaProjection)");
+        await gFFI.serverModel.toggleService(isAuto: true);
+      }
+    });
   }
 
   @override
