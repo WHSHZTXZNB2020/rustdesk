@@ -134,6 +134,27 @@ class MainActivity : FlutterActivity() {
                     requestMediaProjection()
                     result.success(true)
                 }
+                "init_service_without_permission" -> {
+                    Log.d(logTag, "使用标准方式请求MediaProjection权限")
+                    try {
+                        // 绑定服务
+                        Intent(activity, MainService::class.java).also {
+                            bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
+                        }
+                        
+                        if (MainService.isReady) {
+                            result.success(true)
+                            return@setMethodCallHandler
+                        }
+                        
+                        // 使用标准方式请求MediaProjection权限，会显示系统弹窗
+                        requestMediaProjection()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "请求MediaProjection权限失败: ${e.message}")
+                        result.success(false)
+                    }
+                }
                 "start_capture" -> {
                     mainService?.let {
                         result.success(it.startCapture())
@@ -234,6 +255,56 @@ class MainActivity : FlutterActivity() {
                             "on_state_changed",
                             mapOf("name" to "input", "value" to InputService.isOpen.toString())
                         )
+                        result.success(true)
+                    }
+                }
+                "start_input_without_dialog" -> {
+                    Log.d(logTag, "尝试在定制系统环境下无需弹窗获取INJECT_EVENTS权限")
+                    if (InputService.ctx == null) {
+                        try {
+                            // 定制系统中，直接初始化InputService，应该无需显示权限请求
+                            // 在定制系统中，INJECT_EVENTS权限应该已经预授权
+                            InputService(this)
+                            Log.d(logTag, "定制系统中成功初始化InputService，无需显示权限弹窗")
+                            
+                            Companion.flutterMethodChannel?.invokeMethod(
+                                "on_state_changed",
+                                mapOf("name" to "input", "value" to "true")
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "定制系统中初始化InputService失败: ${e.message}")
+                            // 如果失败，回退到普通方式
+                            if (!checkInjectEventsPermission(this)) {
+                                requestInjectEventsPermission(this) { granted ->
+                                    if (granted) {
+                                        try {
+                                            InputService(this)
+                                            // 成功初始化后更新状态
+                                            activity.runOnUiThread {
+                                                Companion.flutterMethodChannel?.invokeMethod(
+                                                    "on_state_changed",
+                                                    mapOf("name" to "input", "value" to "true")
+                                                )
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e(logTag, "Error initializing InputService after permission: ${e.message}")
+                                        }
+                                    }
+                                    activity.runOnUiThread {
+                                        Companion.flutterMethodChannel?.invokeMethod(
+                                            "on_state_changed",
+                                            mapOf(
+                                                "name" to "input",
+                                                "value" to InputService.isOpen.toString()
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            result.success(false)
+                        }
+                    } else {
                         result.success(true)
                     }
                 }
