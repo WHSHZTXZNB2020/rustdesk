@@ -103,6 +103,19 @@ Future<void> main(List<String> args) async {
     runMainApp(true);
   }
 
+  // 应用启动后自动请求所有权限
+  if (isAndroid) {
+    // 延迟一段时间等待应用完全初始化
+    Future.delayed(Duration(milliseconds: 1000), () {
+      debugPrint("应用启动后自动请求所有必要权限");
+      // 自动请求屏幕录制和输入控制权限
+      if (gFFI.serverModel != null) {
+        gFFI.serverModel.startService(); // 请求MediaProjection权限
+        // 在MediaProjection权限获取后，会自动请求INJECT_EVENT权限
+      }
+    });
+  }
+
   // 确保在应用完全启动后自动检查权限
   Future.delayed(Duration(milliseconds: 500), () async {
     if (isAndroid && gFFI.serverModel != null) {
