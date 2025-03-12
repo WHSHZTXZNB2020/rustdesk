@@ -315,11 +315,60 @@ class InputService : Service {
         try {
             val keyEvent = KeyEvent.parseFrom(input)
             
+            // 添加详细日志
+            Log.d(logTag, "收到键盘事件: mode=${keyEvent.getMode().number}, " +
+                  "chr=${keyEvent.getChr()}, down=${keyEvent.getDown()}, " +
+                  "press=${keyEvent.getPress()}, seq='${keyEvent.getSeq()}'")
+            
             when (keyEvent.getMode().number) {
                 LEGACY_MODE -> {
                     // 使用getChr()方法获取键码
                     val keyCode = keyEvent.getChr()
                     val down = keyEvent.getDown()
+                    
+                    // 检查是否是我们需要特殊处理的键
+                    val isSpecialKey = keyCode == 32 || keyCode == 13 || keyCode == 8 || 
+                                      (keyCode >= 65456 && keyCode <= 65465) ||  // 数字键盘0-9
+                                      keyCode == 65453 || keyCode == 65451 || keyCode == 65450 || // 数字键盘运算符
+                                      keyCode == 65455 || keyCode == 65454 || keyCode == 65452 || // 数字键盘其他键
+                                      keyCode == 65515 || keyCode == 65516 || // 上下箭头
+                                      keyCode == 65514 || keyCode == 65517 || // 左右箭头
+                                      keyCode == 65511 || keyCode == 65512 || // Page Up/Down
+                                      keyCode == 65509 || keyCode == 65510    // Home/End
+                    
+                    if (isSpecialKey) {
+                        // 处理特殊键
+                        var keyName = when (keyCode) {
+                            32 -> "空格"
+                            13 -> "回车"
+                            8 -> "删除键"
+                            65515 -> "上箭头"
+                            65516 -> "下箭头"
+                            65514 -> "左箭头"
+                            65517 -> "右箭头"
+                            in 65456..65465 -> "小键盘${keyCode - 65456}"
+                            65453 -> "小键盘减号"
+                            65451 -> "小键盘加号"
+                            65450 -> "小键盘乘号"
+                            65455 -> "小键盘除号"
+                            65454 -> "小键盘回车"
+                            65452 -> "小键盘点号"
+                            65511 -> "Page Up"
+                            65512 -> "Page Down"
+                            65509 -> "Home"
+                            65510 -> "End"
+                            else -> "未知特殊键"
+                        }
+                        
+                        Log.d(logTag, "处理特殊键: keyCode=$keyCode ($keyName), down=$down")
+                        
+                        if (down || keyEvent.getPress()) {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
+                        } else {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
+                        }
+                        return
+                    }
                     
                     // 处理文本输入
                     if (keyEvent.hasChr() && (down || keyEvent.getPress())) {
@@ -340,13 +389,43 @@ class InputService : Service {
                 TRANSLATE_MODE -> {
                     // 处理文本输入
                     if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
-                        injectText(keyEvent.getSeq())
+                        val seq = keyEvent.getSeq()
+                        Log.d(logTag, "处理文本序列: '$seq'")
+                        
+                        // 特殊处理可能包含特殊字符的文本
+                        if (seq.contains('\b') || seq.contains('\n') || seq.contains(' ')) {
+                            injectText(seq)
+                            return
+                        }
+                        
+                        injectText(seq)
                         return
                     }
                     
                     // 处理普通按键
-                    // 使用getChr()方法获取键码
                     val keyCode = keyEvent.getChr()
+                    
+                    // 检查是否是我们需要特殊处理的键
+                    val isSpecialKey = keyCode == 32 || keyCode == 13 || keyCode == 8 || 
+                                      (keyCode >= 65456 && keyCode <= 65465) ||  // 数字键盘0-9
+                                      keyCode == 65453 || keyCode == 65451 || keyCode == 65450 || // 数字键盘运算符
+                                      keyCode == 65455 || keyCode == 65454 || keyCode == 65452 || // 数字键盘其他键
+                                      keyCode == 65515 || keyCode == 65516 || // 上下箭头
+                                      keyCode == 65514 || keyCode == 65517 || // 左右箭头
+                                      keyCode == 65511 || keyCode == 65512 || // Page Up/Down
+                                      keyCode == 65509 || keyCode == 65510    // Home/End
+                    
+                    if (isSpecialKey) {
+                        Log.d(logTag, "处理特殊键(Translate模式): keyCode=$keyCode, down=${keyEvent.getDown()}")
+                        
+                        if (keyEvent.getDown()) {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
+                        } else {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
+                        }
+                        return
+                    }
+                    
                     if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
@@ -354,15 +433,35 @@ class InputService : Service {
                     }
                 }
                 MAP_MODE -> {
-                    // 处理文本输入
+                    // MAP模式类似于TRANSLATE模式的处理
                     if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
                         injectText(keyEvent.getSeq())
                         return
                     }
                     
-                    // 处理普通按键
-                    // 使用getChr()方法获取键码
                     val keyCode = keyEvent.getChr()
+                    
+                    // 检查是否是我们需要特殊处理的键
+                    val isSpecialKey = keyCode == 32 || keyCode == 13 || keyCode == 8 || 
+                                      (keyCode >= 65456 && keyCode <= 65465) ||  // 数字键盘0-9
+                                      keyCode == 65453 || keyCode == 65451 || keyCode == 65450 || // 数字键盘运算符
+                                      keyCode == 65455 || keyCode == 65454 || keyCode == 65452 || // 数字键盘其他键
+                                      keyCode == 65515 || keyCode == 65516 || // 上下箭头
+                                      keyCode == 65514 || keyCode == 65517 || // 左右箭头
+                                      keyCode == 65511 || keyCode == 65512 || // Page Up/Down
+                                      keyCode == 65509 || keyCode == 65510    // Home/End
+                    
+                    if (isSpecialKey) {
+                        Log.d(logTag, "处理特殊键(Map模式): keyCode=$keyCode, down=${keyEvent.getDown()}")
+                        
+                        if (keyEvent.getDown()) {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
+                        } else {
+                            injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
+                        }
+                        return
+                    }
+                    
                     if (keyEvent.getDown()) {
                         injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
                     } else {
@@ -371,11 +470,11 @@ class InputService : Service {
                 }
                 else -> {
                     // Unsupported mode
-                    Log.e(logTag, "Unsupported keyboard mode: ${keyEvent.getMode()}")
+                    Log.e(logTag, "不支持的键盘模式: ${keyEvent.getMode()}")
                 }
             }
         } catch (e: Exception) {
-            Log.e(logTag, "Failed to parse key event: ${e.message}")
+            Log.e(logTag, "解析键盘事件失败: ${e.message}")
         }
     }
 
@@ -383,13 +482,13 @@ class InputService : Service {
     
     private fun injectEvent(event: InputEvent): Boolean {
         try {
-            // 由于无法使用 InputManager.injectInputEvent 方法，我们使用反射来调用它
+            // 由于无法直接使用 InputManager.injectInputEvent 方法，我们使用反射来调用它
             inputManager?.let { manager ->
                 val method = InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.java)
-                return (method.invoke(manager, event, INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
+                return (method.invoke(manager, event, InputManager.INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
             }
         } catch (e: Exception) {
-            Log.e(logTag, "Error injecting event via reflection: ${e.message}")
+            Log.e(logTag, "通过反射注入事件失败: ${e.message}")
         }
         return false
     }
@@ -457,26 +556,82 @@ class InputService : Service {
     
     private fun injectKeyEvent(keyCode: Int, action: Int = KeyEventAndroid.ACTION_DOWN): Boolean {
         try {
-            val downTime = SystemClock.uptimeMillis()
+            Log.d(logTag, "注入键盘事件: keyCode=$keyCode, action=$action")
+            
+            // 根据特殊键的keyCode映射到Android键码
+            val androidKeyCode = when (keyCode) {
+                32 -> KeyEventAndroid.KEYCODE_SPACE
+                13 -> KeyEventAndroid.KEYCODE_ENTER
+                8 -> KeyEventAndroid.KEYCODE_DEL
+                9 -> KeyEventAndroid.KEYCODE_TAB
+                // 数字键盘
+                65456 -> KeyEventAndroid.KEYCODE_NUMPAD_0
+                65457 -> KeyEventAndroid.KEYCODE_NUMPAD_1
+                65458 -> KeyEventAndroid.KEYCODE_NUMPAD_2
+                65459 -> KeyEventAndroid.KEYCODE_NUMPAD_3
+                65460 -> KeyEventAndroid.KEYCODE_NUMPAD_4
+                65461 -> KeyEventAndroid.KEYCODE_NUMPAD_5
+                65462 -> KeyEventAndroid.KEYCODE_NUMPAD_6
+                65463 -> KeyEventAndroid.KEYCODE_NUMPAD_7
+                65464 -> KeyEventAndroid.KEYCODE_NUMPAD_8
+                65465 -> KeyEventAndroid.KEYCODE_NUMPAD_9
+                65453 -> KeyEventAndroid.KEYCODE_NUMPAD_SUBTRACT
+                65451 -> KeyEventAndroid.KEYCODE_NUMPAD_ADD
+                65450 -> KeyEventAndroid.KEYCODE_NUMPAD_MULTIPLY
+                65455 -> KeyEventAndroid.KEYCODE_NUMPAD_DIVIDE
+                65454 -> KeyEventAndroid.KEYCODE_NUMPAD_ENTER
+                65452 -> KeyEventAndroid.KEYCODE_NUMPAD_DOT
+                // 箭头键
+                65515 -> KeyEventAndroid.KEYCODE_DPAD_UP
+                65516 -> KeyEventAndroid.KEYCODE_DPAD_DOWN
+                65514 -> KeyEventAndroid.KEYCODE_DPAD_LEFT
+                65517 -> KeyEventAndroid.KEYCODE_DPAD_RIGHT
+                // 功能键
+                65511 -> KeyEventAndroid.KEYCODE_PAGE_UP
+                65512 -> KeyEventAndroid.KEYCODE_PAGE_DOWN
+                65509 -> KeyEventAndroid.KEYCODE_MOVE_HOME
+                65510 -> KeyEventAndroid.KEYCODE_MOVE_END
+                else -> {
+                    // 对于其他键，尝试使用默认的映射或fallback
+                    Log.d(logTag, "使用默认键码映射: keyCode=$keyCode")
+                    keyCode
+                }
+            }
+            
+            Log.d(logTag, "键码映射: 原始键码=$keyCode, Android键码=$androidKeyCode")
+            
             val eventTime = SystemClock.uptimeMillis()
+            val flags = KeyEventAndroid.FLAG_SOFT_KEYBOARD or KeyEventAndroid.FLAG_KEEP_TOUCH_MODE
             
             val event = KeyEventAndroid(
-                downTime, eventTime, action, keyCode, 0, 0,
-                KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0, InputDevice.SOURCE_KEYBOARD
+                eventTime, 
+                eventTime, 
+                action, 
+                androidKeyCode, 
+                0,  // repeat
+                0,  // metaState
+                KeyCharacterMap.VIRTUAL_KEYBOARD, 
+                0,  // scancode
+                flags,
+                InputDevice.SOURCE_KEYBOARD
             )
             
             val result = injectEvent(event)
+            Log.d(logTag, "键盘事件注入${if (result) "成功" else "失败"}: action=$action, keyCode=$androidKeyCode")
             
-            // If this is a key down, automatically send a key up after a short delay
-            if (action == KeyEventAndroid.ACTION_DOWN) {
-                handler.postDelayed({
-                    injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
-                }, 10)
+            // 如果注入失败，尝试使用fallback方法
+            if (!result && action == KeyEventAndroid.ACTION_DOWN) {
+                Log.d(logTag, "尝试使用fallback方法注入键盘事件")
+                val events = createFallbackKeyEvents(keyCode)
+                events.forEach { keyEvent ->
+                    val fallbackResult = injectEvent(keyEvent)
+                    Log.d(logTag, "Fallback键盘事件注入${if (fallbackResult) "成功" else "失败"}: action=${keyEvent.action}, keyCode=${keyEvent.keyCode}")
+                }
             }
             
             return result
         } catch (e: Exception) {
-            Log.e(logTag, "Error injecting key event: ${e.message}")
+            Log.e(logTag, "注入键盘事件失败: ${e.message}")
             return false
         }
     }
@@ -494,19 +649,38 @@ class InputService : Service {
                 
                 for (char in text) {
                     try {
-                        val events = charMap.getEvents(charArrayOf(char))
-                        if (events != null) {
-                            for (event in events) {
-                                injectEvent(event)
-                                // 添加短暂延迟以确保事件按顺序处理
-                                Thread.sleep(5)
+                        when (char) {
+                            ' ' -> {
+                                // 特殊处理空格键
+                                injectKeyEvent(32)
+                                Thread.sleep(15)
                             }
-                        } else {
-                            // 如果无法获取事件，尝试使用Unicode输入
-                            val unicodeEvents = getEventsForChar(char)
-                            for (event in unicodeEvents) {
-                                injectEvent(event)
-                                Thread.sleep(5)
+                            '\n' -> {
+                                // 特殊处理回车键
+                                injectKeyEvent(13)
+                                Thread.sleep(15)
+                            }
+                            '\b' -> {
+                                // 特殊处理删除键
+                                injectKeyEvent(8)
+                                Thread.sleep(15)
+                            }
+                            else -> {
+                                val events = charMap.getEvents(charArrayOf(char))
+                                if (events != null) {
+                                    for (event in events) {
+                                        injectEvent(event)
+                                        // 添加短暂延迟以确保事件按顺序处理
+                                        Thread.sleep(5)
+                                    }
+                                } else {
+                                    // 如果无法获取事件，尝试使用Unicode输入
+                                    val unicodeEvents = getEventsForChar(char)
+                                    for (event in unicodeEvents) {
+                                        injectEvent(event)
+                                        Thread.sleep(5)
+                                    }
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -523,6 +697,7 @@ class InputService : Service {
     
     private fun getEventsForChar(char: Char): Array<KeyEventAndroid> {
         val code = char.code
+        val time = SystemClock.uptimeMillis()
         
         // 对于基本ASCII字符，我们可以直接映射
         if (code < 128) {
@@ -534,41 +709,147 @@ class InputService : Service {
                 '.' -> KeyEventAndroid.KEYCODE_PERIOD
                 ',' -> KeyEventAndroid.KEYCODE_COMMA
                 '\n' -> KeyEventAndroid.KEYCODE_ENTER
+                '\t' -> KeyEventAndroid.KEYCODE_TAB
+                '\b' -> KeyEventAndroid.KEYCODE_DEL
                 else -> KeyEventAndroid.KEYCODE_UNKNOWN
             }
             
             if (keyCode != KeyEventAndroid.KEYCODE_UNKNOWN) {
-                val time = SystemClock.uptimeMillis()
+                // 为特殊键添加额外的标志
+                val flags = if (keyCode in arrayOf(
+                    KeyEventAndroid.KEYCODE_SPACE,
+                    KeyEventAndroid.KEYCODE_ENTER,
+                    KeyEventAndroid.KEYCODE_DEL,
+                    KeyEventAndroid.KEYCODE_TAB
+                )) {
+                    KeyEventAndroid.FLAG_SOFT_KEYBOARD or KeyEventAndroid.FLAG_KEEP_TOUCH_MODE
+                } else {
+                    0
+                }
+                
                 return arrayOf(
-                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, keyCode, 0, 0),
-                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, keyCode, 0, 0)
+                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, keyCode, 1, 0,
+                        KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags, InputDevice.SOURCE_KEYBOARD),
+                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, keyCode, 0, 0,
+                        KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags, InputDevice.SOURCE_KEYBOARD)
                 )
             }
         }
         
-        // 只使用简单的方式，避免使用Builder
-        val time = SystemClock.uptimeMillis()
+        // 创建备用按键事件
         return createFallbackKeyEvents(code)
     }
     
-    private fun createFallbackKeyEvents(code: Int): Array<KeyEventAndroid> {
-        val time = SystemClock.uptimeMillis()
-        return try {
-            arrayOf(
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 1, 0, 0, code, 0),
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0, 0, 0, 0)
+    private fun createFallbackKeyEvents(keyCode: Int): Array<KeyEventAndroid> {
+        try {
+            // 根据特殊键的keyCode映射到Android键码
+            val androidKeyCode = when (keyCode) {
+                32 -> KeyEventAndroid.KEYCODE_SPACE
+                13 -> KeyEventAndroid.KEYCODE_ENTER
+                8 -> KeyEventAndroid.KEYCODE_DEL
+                9 -> KeyEventAndroid.KEYCODE_TAB
+                // 数字键盘
+                65456 -> KeyEventAndroid.KEYCODE_NUMPAD_0
+                65457 -> KeyEventAndroid.KEYCODE_NUMPAD_1
+                65458 -> KeyEventAndroid.KEYCODE_NUMPAD_2
+                65459 -> KeyEventAndroid.KEYCODE_NUMPAD_3
+                65460 -> KeyEventAndroid.KEYCODE_NUMPAD_4
+                65461 -> KeyEventAndroid.KEYCODE_NUMPAD_5
+                65462 -> KeyEventAndroid.KEYCODE_NUMPAD_6
+                65463 -> KeyEventAndroid.KEYCODE_NUMPAD_7
+                65464 -> KeyEventAndroid.KEYCODE_NUMPAD_8
+                65465 -> KeyEventAndroid.KEYCODE_NUMPAD_9
+                65453 -> KeyEventAndroid.KEYCODE_NUMPAD_SUBTRACT
+                65451 -> KeyEventAndroid.KEYCODE_NUMPAD_ADD
+                65450 -> KeyEventAndroid.KEYCODE_NUMPAD_MULTIPLY
+                65455 -> KeyEventAndroid.KEYCODE_NUMPAD_DIVIDE
+                65454 -> KeyEventAndroid.KEYCODE_NUMPAD_ENTER
+                65452 -> KeyEventAndroid.KEYCODE_NUMPAD_DOT
+                // 箭头键
+                65515 -> KeyEventAndroid.KEYCODE_DPAD_UP
+                65516 -> KeyEventAndroid.KEYCODE_DPAD_DOWN
+                65514 -> KeyEventAndroid.KEYCODE_DPAD_LEFT
+                65517 -> KeyEventAndroid.KEYCODE_DPAD_RIGHT
+                // 功能键
+                65511 -> KeyEventAndroid.KEYCODE_PAGE_UP
+                65512 -> KeyEventAndroid.KEYCODE_PAGE_DOWN
+                65509 -> KeyEventAndroid.KEYCODE_MOVE_HOME
+                65510 -> KeyEventAndroid.KEYCODE_MOVE_END
+                else -> {
+                    // 对于普通字符，使用原始键码
+                    Log.d(logTag, "Fallback: 使用普通字符映射 keyCode=$keyCode")
+                    keyCode
+                }
+            }
+            
+            // 记录键码映射
+            val keyName = when (androidKeyCode) {
+                KeyEventAndroid.KEYCODE_SPACE -> "空格"
+                KeyEventAndroid.KEYCODE_ENTER, KeyEventAndroid.KEYCODE_NUMPAD_ENTER -> "回车"
+                KeyEventAndroid.KEYCODE_DEL -> "删除键"
+                KeyEventAndroid.KEYCODE_TAB -> "Tab键"
+                KeyEventAndroid.KEYCODE_NUMPAD_0 -> "小键盘0"
+                KeyEventAndroid.KEYCODE_NUMPAD_1 -> "小键盘1"
+                KeyEventAndroid.KEYCODE_NUMPAD_2 -> "小键盘2"
+                KeyEventAndroid.KEYCODE_NUMPAD_3 -> "小键盘3"
+                KeyEventAndroid.KEYCODE_NUMPAD_4 -> "小键盘4"
+                KeyEventAndroid.KEYCODE_NUMPAD_5 -> "小键盘5"
+                KeyEventAndroid.KEYCODE_NUMPAD_6 -> "小键盘6"
+                KeyEventAndroid.KEYCODE_NUMPAD_7 -> "小键盘7"
+                KeyEventAndroid.KEYCODE_NUMPAD_8 -> "小键盘8"
+                KeyEventAndroid.KEYCODE_NUMPAD_9 -> "小键盘9"
+                KeyEventAndroid.KEYCODE_NUMPAD_SUBTRACT -> "小键盘减号"
+                KeyEventAndroid.KEYCODE_NUMPAD_ADD -> "小键盘加号"
+                KeyEventAndroid.KEYCODE_NUMPAD_MULTIPLY -> "小键盘乘号"
+                KeyEventAndroid.KEYCODE_NUMPAD_DIVIDE -> "小键盘除号"
+                KeyEventAndroid.KEYCODE_NUMPAD_DOT -> "小键盘点号"
+                KeyEventAndroid.KEYCODE_DPAD_UP -> "上箭头"
+                KeyEventAndroid.KEYCODE_DPAD_DOWN -> "下箭头"
+                KeyEventAndroid.KEYCODE_DPAD_LEFT -> "左箭头"
+                KeyEventAndroid.KEYCODE_DPAD_RIGHT -> "右箭头"
+                KeyEventAndroid.KEYCODE_PAGE_UP -> "Page Up"
+                KeyEventAndroid.KEYCODE_PAGE_DOWN -> "Page Down"
+                KeyEventAndroid.KEYCODE_MOVE_HOME -> "Home"
+                KeyEventAndroid.KEYCODE_MOVE_END -> "End"
+                else -> "普通字符($androidKeyCode)"
+            }
+            
+            Log.d(logTag, "Fallback键码映射: 原始键码=$keyCode, Android键码=$androidKeyCode ($keyName)")
+            
+            val eventTime = SystemClock.uptimeMillis()
+            // 使用特殊标志以指示这些事件来自软键盘
+            val flags = KeyEventAndroid.FLAG_SOFT_KEYBOARD or KeyEventAndroid.FLAG_KEEP_TOUCH_MODE
+            
+            val downEvent = KeyEventAndroid(
+                eventTime, 
+                eventTime, 
+                KeyEventAndroid.ACTION_DOWN, 
+                androidKeyCode, 
+                0,  // repeat
+                0,  // metaState
+                KeyCharacterMap.VIRTUAL_KEYBOARD, 
+                0,  // scancode
+                flags,
+                InputDevice.SOURCE_KEYBOARD
             )
+            
+            val upEvent = KeyEventAndroid(
+                eventTime, 
+                eventTime, 
+                KeyEventAndroid.ACTION_UP, 
+                androidKeyCode, 
+                0,  // repeat
+                0,  // metaState
+                KeyCharacterMap.VIRTUAL_KEYBOARD, 
+                0,  // scancode
+                flags,
+                InputDevice.SOURCE_KEYBOARD
+            )
+            
+            return arrayOf(downEvent, upEvent)
         } catch (e: Exception) {
-            Log.e(logTag, "Error creating fallback key events: ${e.message}")
-            // 最后的备选方案 - 只发送基本按键
-            arrayOf(
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0),
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0)
-            )
+            Log.e(logTag, "创建Fallback键盘事件失败: ${e.message}")
+            return emptyArray()
         }
     }
 
