@@ -25,7 +25,7 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="RustDesk"
+        android:label="远程控制"
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
