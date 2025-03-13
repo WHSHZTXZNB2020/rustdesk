@@ -239,13 +239,13 @@ class ServiceNotRunningNotification extends StatelessWidget {
     final serverModel = Provider.of<ServerModel>(context);
 
     return PaddingCard(
-        title: translate("服务未运行"),
+        title: translate("远程未运行"),
         titleIcon:
             const Icon(Icons.warning_amber_sharp, color: Colors.redAccent),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(translate("点击开始服务或启用屏幕录制权限，即可启动屏幕共享服务"),
+            Text(translate("赢商动力科技为您提供远程技术支持"),
                     style:
                         const TextStyle(fontSize: 12, color: MyTheme.darkGray))
                 .marginOnly(bottom: 8),
@@ -255,7 +255,7 @@ class ServiceNotRunningNotification extends StatelessWidget {
                   // 直接启动服务，不显示警告弹窗
                   serverModel.toggleService();
                 },
-                label: Text(translate("启动服务")))
+                label: Text(translate("开始协助")))
           ],
         ));
   }
