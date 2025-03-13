@@ -236,8 +236,28 @@ class ServiceNotRunningNotification extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 不显示任何内容，因为服务会自动启动
-    return const SizedBox.shrink();
+    final serverModel = Provider.of<ServerModel>(context);
+
+    return PaddingCard(
+        title: translate("服务未运行"),
+        titleIcon:
+            const Icon(Icons.warning_amber_sharp, color: Colors.redAccent),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(translate("点击开始服务或启用屏幕录制权限，即可启动屏幕共享服务"),
+                    style:
+                        const TextStyle(fontSize: 12, color: MyTheme.darkGray))
+                .marginOnly(bottom: 8),
+            ElevatedButton.icon(
+                icon: const Icon(Icons.play_arrow),
+                onPressed: () {
+                  // 直接启动服务，不显示警告弹窗
+                  serverModel.toggleService();
+                },
+                label: Text(translate("启动服务")))
+          ],
+        ));
   }
 }
 
@@ -569,16 +589,15 @@ class _PermissionCheckerState extends State<PermissionChecker> {
                       label: Text(translate("Stop service")))
                   .marginOnly(bottom: 8)
               : SizedBox.shrink(),
-          // 屏幕录制开关，无论是否已启用，都使用SwitchListTile，但根据状态决定是否可交互
-          SwitchListTile(
-            visualDensity: VisualDensity.compact,
-            contentPadding: EdgeInsets.all(0),
-            title: Text(translate("Screen Capture")),
-            value: serverModel.mediaOk,
-            onChanged: serverModel.mediaOk ? null : (_) => serverModel.toggleService(),
-          ),
-          PermissionRow(translate("Input Control"), serverModel.inputOk,
-              serverModel.toggleInput),
+          // 屏幕录制开关也不显示，因为有服务未运行页面的启动按钮和自动启动功能
+          // SwitchListTile(
+          //   visualDensity: VisualDensity.compact,
+          //   contentPadding: EdgeInsets.all(0),
+          //   title: Text(translate("Screen Capture")),
+          //   value: serverModel.mediaOk,
+          //   onChanged: serverModel.mediaOk ? null : (_) => serverModel.toggleService(),
+          // ),
+          // Input Control functionality is still active but not displayed in UI
           PermissionRow(translate("Transfer file"), serverModel.fileOk,
               serverModel.toggleFile),
           hasAudioPermission
