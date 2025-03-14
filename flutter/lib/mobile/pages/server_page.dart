@@ -168,9 +168,9 @@ class _ServerPageState extends State<ServerPage> {
     });
     gFFI.serverModel.checkAndroidPermission();
     
-    // 应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限
+    // 应用启动后立即请求系统屏幕捕获权限（已预授权环境下）
     Future.delayed(Duration(milliseconds: 100), () async {
-      debugPrint("应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限");
+      debugPrint("应用启动后立即请求系统权限");
       
       // 先请求输入控制权限（预授权环境下应该直接成功）
       if (!gFFI.serverModel.inputOk) {
@@ -181,9 +181,9 @@ class _ServerPageState extends State<ServerPage> {
         await Future.delayed(Duration(milliseconds: 300));
       }
       
-      // 无论输入控制权限是否获取成功，都自动请求屏幕录制权限
+      // 使用系统权限模式自动启动屏幕捕获服务
       if (!gFFI.serverModel.isStart) {
-        debugPrint("无论输入控制权限状态，都自动请求屏幕录制权限(MediaProjection)");
+        debugPrint("开始使用系统权限模式启动屏幕捕获服务");
         await gFFI.serverModel.toggleService(isAuto: true);
       }
     });
@@ -238,6 +238,8 @@ class ServiceNotRunningNotification extends StatelessWidget {
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
 
+    // 注意：在商米设备环境下，服务应该会自动启动
+    // 此UI块作为备用方案保留，以防服务未能自动启动
     return PaddingCard(
         title: translate("远程未运行"),
         titleIcon:
@@ -249,13 +251,35 @@ class ServiceNotRunningNotification extends StatelessWidget {
                     style:
                         const TextStyle(fontSize: 12, color: MyTheme.darkGray))
                 .marginOnly(bottom: 8),
+            // 添加商米设备限制提示
+            Container(
+              margin: EdgeInsets.only(bottom: 10),
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.amber, width: 1),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber, size: 16)
+                      .marginOnly(right: 8),
+                  Expanded(
+                    child: Text(
+                      translate("此应用需要在商米设备环境中使用，请确保您正在使用商米设备。"),
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             ElevatedButton.icon(
                 icon: const Icon(Icons.play_arrow),
                 onPressed: () {
-                  // 直接启动服务，不显示警告弹窗
+                  // 使用系统权限模式启动服务
                   serverModel.toggleService();
                 },
-                label: Text(translate("开始协助")))
+                label: Text(translate("重试启动服务")))
           ],
         ));
   }
@@ -507,6 +531,32 @@ class ServerInfo extends StatelessWidget {
         child: Column(
           // ID
           children: [
+            // 添加商米设备限制标记
+            Container(
+              margin: EdgeInsets.only(bottom: 15),
+              padding: EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, 
+                       size: 14, 
+                       color: Theme.of(context).colorScheme.primary),
+                  SizedBox(width: 6),
+                  Text(
+                    translate("仅限商米设备使用"),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Row(children: [
               const Icon(Icons.perm_identity,
                       color: Colors.grey, size: iconSize)
@@ -589,7 +639,8 @@ class _PermissionCheckerState extends State<PermissionChecker> {
                       label: Text(translate("Stop service")))
                   .marginOnly(bottom: 8)
               : SizedBox.shrink(),
-          // 屏幕录制开关也不显示，因为有服务未运行页面的启动按钮和自动启动功能
+          // 在新的系统权限模式下，屏幕录制应该自动启动，不需要显示开关
+          // 保留备注，以便了解原始设计意图
           // SwitchListTile(
           //   visualDensity: VisualDensity.compact,
           //   contentPadding: EdgeInsets.all(0),
@@ -627,7 +678,7 @@ class PermissionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 如果是"输入控制"或"屏幕录制"且已启用，则禁用开关操作
+    // 在系统权限模式下，"输入控制"和"屏幕录制"权限已预先授权，开关应设为只读
     if ((name == translate("Input Control") || name == translate("Screen Capture")) && isOk) {
       return SwitchListTile(
         visualDensity: VisualDensity.compact,
