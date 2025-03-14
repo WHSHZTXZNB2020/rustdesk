@@ -344,8 +344,22 @@ class MainService : Service() {
             }
         }
         
-        // 标记服务为已就绪 (强制设置为true，跳过设备检查)
-        _isReady = true
+        // 检测设备是否为商米设备
+        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                            Build.MODEL.toLowerCase().contains("sunmi") ||
+                            Build.BRAND.toLowerCase().contains("sunmi")
+        
+        // 标记服务为已就绪
+        if (isSunmiDevice) {
+            Log.d(logTag, "检测到商米设备，强制标记服务为就绪状态")
+            _isReady = true
+            
+            // 通知服务状态变化
+            notifyStateChanged()
+        } else {
+            // 常规初始化流程，检查系统权限
+            checkSystemPermissions()
+        }
         
         mContext = this.applicationContext
         
@@ -448,6 +462,9 @@ class MainService : Service() {
             super.onStartCommand(intent, flags, startId)
             
             createForegroundNotification()
+            
+            // 更新服务状态为已启动
+            _isStart = true
 
             // 先检查系统权限并设置就绪状态
             checkSystemPermissions()
@@ -549,6 +566,9 @@ class MainService : Service() {
                 Log.d(logTag, "非开机自动启动，无需特殊处理")
             }
             
+            // 确保通知状态更新
+            notifyStateChanged()
+            
             return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
         } catch (e: Exception) {
             Log.e(logTag, "Error in onStartCommand: ${e.message}")
@@ -570,11 +590,17 @@ class MainService : Service() {
         val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
         val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
         
+        // 检查是否为商米设备
+        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                            Build.MODEL.toLowerCase().contains("sunmi") ||
+                            Build.BRAND.toLowerCase().contains("sunmi")
+        
         // 添加更多详细日志
         Log.d(logTag, "========== 系统权限详细检查 ==========")
         Log.d(logTag, "包名: $packageName")
         Log.d(logTag, "系统版本: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})")
         Log.d(logTag, "设备型号: ${Build.MANUFACTURER} ${Build.MODEL}")
+        Log.d(logTag, "是否为商米设备: $isSunmiDevice")
         Log.d(logTag, "CAPTURE_VIDEO_OUTPUT 权限状态: $captureVideoOutput (${pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName)})")
         Log.d(logTag, "READ_FRAME_BUFFER 权限状态: $readFrameBuffer (${pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName)})")
         Log.d(logTag, "ACCESS_SURFACE_FLINGER 权限状态: $accessSurfaceFlinger (${pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName)})")
@@ -590,20 +616,64 @@ class MainService : Service() {
             Log.e(logTag, "获取已授予权限列表失败: ${e.message}")
         }
         
-        // 强制设置为已就绪状态，忽略设备类型检查
-        _isReady = true
-        Log.d(logTag, "已设置为就绪状态，将尝试捕获屏幕")
+        if (isSunmiDevice) {
+            // 商米设备特殊处理 - 通过功能测试检查真实权限
+            val videoOutputResult = testVideoOutputCapture()
+            
+            Log.d(logTag, "商米设备功能测试 - VideoOutput: $videoOutputResult")
+            
+            if (videoOutputResult) {
+                // 如果功能测试成功，标记为就绪
+                _isReady = true
+                Log.d(logTag, "商米设备功能测试成功，设置为就绪状态")
+            } else {
+                // 即使功能测试失败，仍然为商米设备强制设置为就绪
+                // 可以为某些机型做特殊处理
+                if (Build.MODEL.contains("L2K-B")) {
+                    _isReady = true
+                    Log.d(logTag, "商米特定设备(L2K-B)，强制设置为就绪状态")
+                } else {
+                    _isReady = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
+                    Log.d(logTag, "商米设备功能测试失败，按实际权限设置就绪状态")
+                }
+            }
+        } else {
+            // 非商米设备 - 根据标准权限检查
+            _isReady = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
+        }
         
         if (_isReady) {
             Log.d(logTag, "系统屏幕捕获权限已授予，可以进行屏幕捕获")
+            
+            // 通知前台通知已存在，服务正在运行
+            if (isServiceRunningInForeground(this)) {
+                Log.d(logTag, "服务已在前台运行中，更新_isStart状态")
+                _isStart = true
+            }
         } else {
             Log.e(logTag, "⚠️ 警告：未获得任何屏幕捕获权限！应用将无法捕获屏幕内容")
         }
         
         // 通知Flutter UI权限状态更新
         notifyStateChanged()
+        
+        // 延迟再次发送状态更新，确保Flutter层接收到
+        Handler(Looper.getMainLooper()).postDelayed({
+            notifyStateChanged()
+        }, 500)
     }
     
+    // 检查服务是否作为前台服务运行
+    private fun isServiceRunningInForeground(context: Context): Boolean {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (MainService::class.java.name == service.service.className) {
+                return service.foreground
+            }
+        }
+        return false
+    }
+
     // 通知Flutter UI状态变化
     private fun notifyStateChanged() {
         Handler(Looper.getMainLooper()).post {
@@ -717,36 +787,69 @@ class MainService : Service() {
         try {
             Log.d(logTag, "【屏幕捕获】开始尝试捕获屏幕")
             
-            // 尝试所有可能的捕获方法，不区分设备类型
+            // 检查是否为商米设备
+            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                                Build.MODEL.toLowerCase().contains("sunmi") ||
+                                Build.BRAND.toLowerCase().contains("sunmi")
             
-            // 首先尝试VideoOutput
-            if (tryCaptureVideoOutput()) {
-                Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
-                return true
-            }
-            
-            // 然后尝试SurfaceFlinger
-            if (tryCaptureSurfaceFlinger()) {
-                Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
-                return true
-            }
-            
-            // 再尝试FrameBuffer
-            if (tryReadFrameBuffer()) {
-                Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
-                return true
-            }
-            
-            // 尝试备用方法
-            if (tryFallbackCapture()) {
-                Log.d(logTag, "【屏幕捕获】成功启动备用捕获方法")
-                return true
-            }
-            
-            // 针对商米设备的特殊方法也尝试
-            if (trySunmiSpecificCapture()) {
-                Log.d(logTag, "【屏幕捕获】成功启动商米特定捕获方法")
-                return true
+            // 商米设备优先使用VideoOutput
+            if (isSunmiDevice) {
+                Log.d(logTag, "【屏幕捕获】商米设备优先尝试VideoOutput捕获方法")
+                
+                // 首先尝试VideoOutput方法
+                if (tryCaptureVideoOutput()) {
+                    Log.d(logTag, "【屏幕捕获】商米设备成功使用VideoOutput捕获")
+                    return true
+                }
+                
+                // 再尝试备用方法
+                if (tryFallbackCapture()) {
+                    Log.d(logTag, "【屏幕捕获】商米设备成功使用备用捕获方法")
+                    return true
+                }
+                
+                // 商米专用方法
+                if (trySunmiSpecificCapture()) {
+                    Log.d(logTag, "【屏幕捕获】成功使用商米专用捕获方法")
+                    return true
+                }
+                
+                // 最后才尝试其他标准方法
+                if (tryCaptureSurfaceFlinger()) {
+                    Log.d(logTag, "【屏幕捕获】商米设备成功使用SurfaceFlinger捕获")
+                    return true
+                }
+                
+                if (tryReadFrameBuffer()) {
+                    Log.d(logTag, "【屏幕捕获】商米设备成功使用FrameBuffer捕获")
+                    return true
+                }
+            } else {
+                // 非商米设备按标准顺序尝试
+                
+                // 首先尝试VideoOutput
+                if (tryCaptureVideoOutput()) {
+                    Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
+                    return true
+                }
+                
+                // 然后尝试SurfaceFlinger
+                if (tryCaptureSurfaceFlinger()) {
+                    Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
+                    return true
+                }
+                
+                // 再尝试FrameBuffer
+                if (tryReadFrameBuffer()) {
+                    Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
+                    return true
+                }
+                
+                // 尝试备用方法
+                if (tryFallbackCapture()) {
+                    Log.d(logTag, "【屏幕捕获】成功启动备用捕获方法")
+                    return true
+                }
             }
             
             // 所有方法都失败
@@ -823,6 +926,11 @@ class MainService : Service() {
                 }
             }
             
+            // 检查是否为商米设备
+            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                                Build.MODEL.toLowerCase().contains("sunmi") ||
+                                Build.BRAND.toLowerCase().contains("sunmi")
+            
             try {
                 // 尝试创建虚拟显示
                 val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -833,6 +941,41 @@ class MainService : Service() {
                 // 使用更多选项
                 val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE
                 
+                if (isSunmiDevice) {
+                    Log.d(logTag, "【屏幕捕获】商米设备尝试使用简化方式创建虚拟显示")
+                    
+                    // 对商米设备，首先尝试简化方式
+                    try {
+                        // 使用更低的分辨率和不同的flags组合
+                        val displayWidth = min(640, SCREEN_INFO.width)
+                        val displayHeight = min(480, SCREEN_INFO.height)
+                        
+                        virtualDisplay = displayManager.createVirtualDisplay(
+                            "RustDeskSimple",
+                            displayWidth, displayHeight, 160,
+                            surface,
+                            DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                        )
+                        
+                        if (virtualDisplay != null) {
+                            Log.d(logTag, "【屏幕捕获】成功创建简化虚拟显示")
+                            mCurrentCaptureMethod = "VideoOutput(简化)"
+                            
+                            // 启动捕获线程
+                            isCapturing = true
+                            screenCaptureThread = Thread {
+                                captureVideoOutputFrames()
+                            }
+                            screenCaptureThread?.start()
+                            
+                            return true
+                        }
+                    } catch (e: Exception) {
+                        Log.e(logTag, "【屏幕捕获】创建简化虚拟显示失败: ${e.message}")
+                    }
+                }
+                
+                // 标准尝试
                 try {
                     virtualDisplay = displayManager.createVirtualDisplay(
                         "RustDeskCapture",
@@ -860,45 +1003,12 @@ class MainService : Service() {
                     }
                 } catch (e: Exception) {
                     Log.e(logTag, "【屏幕捕获】创建虚拟显示失败: ${e.message}")
-                    
-                    // 特殊处理: 在商米设备上，即使抛出异常也尝试继续
-                    val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi")
-                    if (isSunmiDevice) {
-                        Log.d(logTag, "【屏幕捕获】商米设备上虚拟显示创建异常，尝试继续捕获")
-                        
-                        // 尝试使用其他方式创建虚拟显示
-                        try {
-                            // 使用更简单的参数
-                            virtualDisplay = displayManager.createVirtualDisplay(
-                                "RustDeskSimple",
-                                640, 480, 160,
-                                surface,
-                                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-                            )
-                            
-                            if (virtualDisplay != null) {
-                                Log.d(logTag, "【屏幕捕获】成功创建简化虚拟显示")
-                                mCurrentCaptureMethod = "VideoOutput(简化)"
-                                
-                                // 启动捕获线程
-                                isCapturing = true
-                                screenCaptureThread = Thread {
-                                    captureVideoOutputFrames()
-                                }
-                                screenCaptureThread?.start()
-                                
-                                return true
-                            }
-                        } catch (e2: Exception) {
-                            Log.e(logTag, "【屏幕捕获】创建简化虚拟显示也失败: ${e2.message}")
-                        }
-                    }
                 }
             } catch (e: Exception) {
                 Log.e(logTag, "【屏幕捕获】获取DisplayManager失败: ${e.message}")
             }
             
-            // 如果直接方法失败，尝试使用nativeInitVideoCapture
+            // 尝试原生方法
             try {
                 val result = nativeInitVideoCapture(mContext.packageName)
                 Log.d(logTag, "【屏幕捕获】原生VideoOutput方法结果: $result")
@@ -1391,6 +1501,21 @@ class MainService : Service() {
     private fun initSurfaceControl() {
         try {
             Log.d(logTag, "开始初始化SurfaceControl...")
+            
+            // 检查是否为商米设备
+            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") || 
+                                Build.MODEL.toLowerCase().contains("sunmi") ||
+                                Build.BRAND.toLowerCase().contains("sunmi")
+            
+            if (isSunmiDevice) {
+                Log.d(logTag, "检测到商米设备，使用专用初始化逻辑")
+                
+                // 对于商米设备，我们记录状态但不强制初始化失败
+                // 这样后续可以尝试其他捕获方法
+                mCurrentCaptureMethod = "商米专用"
+            }
+            
+            // 尝试常规初始化方法，即使是商米设备也尝试
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try {
                     mSurfaceControl = SurfaceControl.Builder()
@@ -1428,9 +1553,13 @@ class MainService : Service() {
                     Log.e(logTag, "通过系统服务获取SurfaceControl失败: ${e.message}")
                 }
             }
+            
+            // 如果所有方法都失败，但是是商米设备，我们不视为错误
+            if (mSurfaceControl == null && isSunmiDevice) {
+                Log.d(logTag, "商米设备上SurfaceControl初始化失败，将尝试其他捕获方法")
+            }
         } catch (e: Exception) {
             Log.e(logTag, "初始化SurfaceControl出错: ${e.message}")
-            mSurfaceControl = null
         }
     }
 
