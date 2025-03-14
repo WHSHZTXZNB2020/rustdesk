@@ -175,6 +175,12 @@ class ServerModel with ChangeNotifier {
         if (await bind.optionSynced()) {
           await timerCallback();
         }
+        
+        // 应用启动时自动启动远程服务，无需用户交互
+        if (isAndroid) {
+          debugPrint("应用启动，准备自动启动远程服务");
+          await autoStartService();
+        }
       });
       Timer.periodic(Duration(milliseconds: 500), (timer) async {
         await timerCallback();
@@ -397,9 +403,16 @@ class ServerModel with ChangeNotifier {
         stopService();
       }
     } else {
-      // 不显示任何确认对话框，直接启动服务
-      debugPrint("直接启动服务，不显示任何确认弹窗");
+      // 直接启动服务，无需确认
+      debugPrint("直接启动服务，无需确认");
       startService();
+      
+      // 启动服务后，确保输入控制权限已获取
+      Future.delayed(Duration(milliseconds: 1000), () async {
+        if (!_inputOk) {
+          await autoEnableInput();
+        }
+      });
     }
   }
 
@@ -408,16 +421,27 @@ class ServerModel with ChangeNotifier {
     try {
       debugPrint("开始启动屏幕共享服务...");
       
+      // 首先检查服务状态，可能已经在运行
+      await checkServiceStatus();
+      
+      // 如果已经在运行，直接返回
+      if (_isStart) {
+        debugPrint("服务已经在运行中，无需再次启动");
+        notifyListeners();
+        return;
+      }
+      
       // 使用系统权限模式启动服务
       try {
         // 直接调用init_service_without_permission方法 - 在商米设备环境下直接获取系统权限
         await parent.target?.invokeMethod("init_service_without_permission");
         debugPrint("已使用系统权限模式启动服务");
         
-        // 服务启动成功后设置状态
-        _isStart = true;
-        notifyListeners();
-        parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
+        // 服务启动后等待短暂时间，让服务有时间更新状态
+        await Future.delayed(Duration(milliseconds: 500));
+        
+        // 再次检查服务状态
+        await checkServiceStatus();
         
         // 其余服务初始化
         await bind.mainStartService();
@@ -434,42 +458,36 @@ class ServerModel with ChangeNotifier {
         }
       } catch (e) {
         debugPrint("启动屏幕共享服务失败: $e");
-        _isStart = false;
-        notifyListeners();
         
-        // 检查是否是权限相关错误
-        if (e.toString().contains("Permission") || 
-            e.toString().contains("permission") ||
-            e.toString().contains("SecurityException")) {
-          // 可能是非商米设备
-          parent.target?.dialogManager.show((setState, close, context) {
-            return CustomAlertDialog(
-              title: Text(translate("设备不支持")),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(translate("此应用需要在商米设备环境中使用。")),
-                  SizedBox(height: 8),
-                  Text(translate("当前设备不支持所需的系统权限，无法正常使用远程协助功能。"))
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: close,
-                  child: Text(translate("确定"))
-                )
-              ],
-              onSubmit: close,
-              onCancel: close,
-            );
-          });
+        // 启动失败但需要再次检查，因为可能服务已经在运行
+        await checkServiceStatus();
+        
+        // 记录错误日志，但不显示弹窗
+        if (!_isStart) {
+          debugPrint("服务启动尝试失败，但仍将继续尝试其他方式: $e");
         }
       }
     } catch (e) {
       debugPrint("启动服务失败: $e");
       _isStart = false;
       notifyListeners();
+    }
+  }
+
+  /// 检查服务运行状态
+  Future<void> checkServiceStatus() async {
+    try {
+      // 调用check_service方法
+      await parent.target?.invokeMethod("check_service");
+      
+      // 等待状态更新 (让onStateChanged回调有时间执行)
+      await Future.delayed(Duration(milliseconds: 300));
+      
+      // 检查是否有服务启动失败的提示或错误
+      // 这里依赖于调用check_service后通过on_state_changed回调更新的状态
+      debugPrint("服务状态检查结果: _isStart=$_isStart, _mediaOk=$_mediaOk");
+    } catch (e) {
+      debugPrint("检查服务状态出错: $e");
     }
   }
 
@@ -506,12 +524,13 @@ class ServerModel with ChangeNotifier {
   }
 
   changeStatue(String name, bool value) {
-    debugPrint("changeStatue value $value");
+    debugPrint("changeStatue name=$name value=$value");
     switch (name) {
       case "media":
         _mediaOk = value;
         if (value && !_isStart) {
-          startService();
+          // 检查服务状态
+          checkServiceStatus();
         }
         break;
       case "input":
@@ -521,6 +540,23 @@ class ServerModel with ChangeNotifier {
               value: value ? defaultOptionYes : 'N');
         }
         _inputOk = value;
+        break;
+      case "start":
+        // 直接处理服务已启动的状态通知
+        if (value != _isStart) {
+          debugPrint("服务启动状态已变更: $value");
+          _isStart = value;
+          
+          if (value) {
+            // 服务已启动，确保更新其他状态
+            parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
+            bind.mainStartService();
+            updateClientState();
+            if (isAndroid) {
+              androidUpdatekeepScreenOn();
+            }
+          }
+        }
         break;
       default:
         return;
@@ -863,6 +899,157 @@ class ServerModel with ChangeNotifier {
     }
   }
 
+  /// 应用启动时自动启动远程服务并获取所有权限（完善版）
+  Future<void> autoStartService() async {
+    try {
+      debugPrint("自动启动远程服务流程开始");
+      
+      // 检查是否有必要的权限 (Android 13+通知权限)
+      if (androidVersion >= 33) {
+        final hasNotificationPermission = await AndroidPermissionManager.check(kAndroid13Notification);
+        if (!hasNotificationPermission) {
+          debugPrint("自动请求通知权限");
+          await AndroidPermissionManager.request(kAndroid13Notification);
+        }
+      }
+      
+      // 优先检查并请求商米平台的三个特殊动态权限
+      // CAPTURE_VIDEO_OUTPUT, READ_FRAME_BUFFER, ACCESS_SURFACE_FLINGER
+      debugPrint("优先请求商米平台特有的屏幕捕获权限");
+      final systemPermissionsMap = await requestSystemPermissionsWithResult();
+      debugPrint("商米特有系统权限请求结果: $systemPermissionsMap");
+      
+      // 处理商米平台特有的权限管理方式
+      final isSunmiDevice = systemPermissionsMap['is_sunmi_device'] == true;
+      
+      if (isSunmiDevice) {
+        debugPrint("检测到商米设备，采用商米平台特有的权限处理方式");
+        
+        // 检查权限状态 - 这里我们既检查标准的权限状态，也执行功能测试
+        final permissionsGranted = systemPermissionsMap['capture_video_output'] == true || 
+                                   systemPermissionsMap['read_frame_buffer'] == true || 
+                                   systemPermissionsMap['access_surface_flinger'] == true;
+        
+        debugPrint("通过标准权限检查的结果：$permissionsGranted");
+        
+        // 特别重要：对于商米设备，即使权限检查不通过，也可能实际功能可用
+        // 尝试通过功能测试验证
+        bool functionalityAvailable = false;
+        try {
+          final testResult = await testScreenCaptureWithResult();
+          debugPrint('屏幕捕获功能测试结果: $testResult');
+          functionalityAvailable = testResult['capture_status'] == true;
+        } catch (e) {
+          debugPrint('功能测试失败: $e');
+        }
+        
+        // 商米平台特有情况：如果功能测试通过，则视为权限已授予
+        if (functionalityAvailable) {
+          debugPrint("商米设备功能测试通过，忽略标准权限检查结果");
+        } else if (!permissionsGranted) {
+          // 如果功能测试和权限检查都失败，提示用户
+          debugPrint("商米设备权限检查和功能测试均失败");
+          debugPrint("请通过商米平台管理界面授予应用所需权限");
+          
+          // 尝试通过本地方法再次请求
+          await requestSystemPermissions();
+          
+          // 再次检查功能
+          try {
+            final retestResult = await testScreenCaptureWithResult();
+            functionalityAvailable = retestResult['capture_status'] == true;
+            debugPrint('权限请求后屏幕捕获重新测试结果: $functionalityAvailable');
+          } catch (e) {
+            debugPrint('权限请求后功能重新测试失败: $e');
+          }
+        }
+        
+        // 如果功能可用（无论权限检查如何），继续启动服务
+        if (functionalityAvailable || permissionsGranted) {
+          debugPrint("商米设备权限验证通过，继续启动服务");
+        } else {
+          debugPrint("商米设备权限验证失败，需要通过平台管理界面授权");
+          // 这里不返回，继续尝试启动服务
+        }
+      } else {
+        debugPrint("非商米设备，使用标准权限流程");
+      }
+      
+      // 确保悬浮窗权限（对于非商米设备也需要）
+      if (await AndroidPermissionManager.check(kSystemAlertWindow) == false) {
+        debugPrint("请求悬浮窗权限");
+        await AndroidPermissionManager.request(kSystemAlertWindow);
+      }
+      
+      // 检查服务状态，如果已启动则不需要再次启动
+      await checkServiceStatus();
+      if (_isStart) {
+        debugPrint("远程服务已经在运行中，无需再次启动");
+        
+        // 即使服务已经启动，也尝试获取输入控制权限
+        if (!_inputOk) {
+          debugPrint("服务已启动，尝试自动获取输入控制权限");
+          await autoEnableInput();
+        }
+        return;
+      }
+      
+      // 自动启动远程服务
+      debugPrint("自动启动远程服务");
+      
+      if (isSunmiDevice) {
+        // 商米设备使用无需权限的方式启动服务
+        debugPrint("商米设备使用无需权限方式启动服务");
+        await startServiceWithoutPermission();
+      } else {
+        // 标准方式启动服务
+        await startService();
+      }
+      
+      // 确保输入控制权限已经请求
+      if (!_inputOk) {
+        debugPrint("尝试自动获取输入控制权限");
+        await autoEnableInput();
+      }
+      
+      debugPrint("自动启动服务流程完成");
+    } catch (e) {
+      debugPrint("自动启动服务异常: $e");
+    }
+  }
+
+  /// 自动请求所有其他必要权限
+  Future<void> requestOtherPermissions() async {
+    try {
+      // 文件传输权限
+      if (!_fileOk && await AndroidPermissionManager.check(kManageExternalStorage) == false) {
+        debugPrint("自动请求文件存储权限");
+        await AndroidPermissionManager.request(kManageExternalStorage);
+      }
+      
+      // 音频权限
+      if (!_audioOk && androidVersion >= 30 && await AndroidPermissionManager.check(kRecordAudio) == false) {
+        debugPrint("自动请求录音权限");
+        await AndroidPermissionManager.request(kRecordAudio);
+      }
+      
+      // 悬浮窗权限
+      if (await AndroidPermissionManager.check(kSystemAlertWindow) == false) {
+        debugPrint("自动请求悬浮窗权限");
+        await AndroidPermissionManager.request(kSystemAlertWindow);
+      }
+      
+      // 检查系统权限
+      debugPrint("检查系统权限状态");
+      await checkSystemPermissions();
+      
+      // 更新权限状态到UI
+      notifyListeners();
+    } catch (e) {
+      debugPrint("请求其他权限时出错: $e");
+    }
+  }
+
   /// 自动启用输入控制，针对定制系统，静默获取权限
   /// 返回是否成功获取权限
   Future<bool> autoEnableInput() async {
@@ -872,29 +1059,37 @@ class ServerModel with ChangeNotifier {
       return true;
     }
     
-    debugPrint("静默请求INJECT_EVENTS权限");
+    debugPrint("自动请求INJECT_EVENTS权限");
     
-    // 直接尝试获取输入控制权限，在定制系统中应该直接成功
+    // 多次尝试获取输入控制权限
     if (parent.target != null) {
       try {
-        // 使用特殊方法直接获取权限（优先）
+        // 首先尝试静默方式获取权限（适用于商米设备）
         await parent.target?.invokeMethod("start_input_without_dialog");
         debugPrint("INJECT_EVENTS权限静默请求已发送");
         
         // 等待短暂时间，让系统有机会处理权限请求
-        await Future.delayed(Duration(milliseconds: 200));
+        await Future.delayed(Duration(milliseconds: 300));
         
         // 检查权限是否已获取
         if (!_inputOk) {
-          // 静默方式可能未成功，尝试常规方式
+          // 静默方式可能未成功，尝试常规方式 (可能会显示系统弹窗)
           debugPrint("静默方式未成功，尝试常规方式请求INJECT_EVENTS权限");
           await parent.target?.invokeMethod("start_input");
           
           // 再次等待权限更新
-          await Future.delayed(Duration(milliseconds: 200));
+          await Future.delayed(Duration(milliseconds: 500));
+          
+          // 第三次尝试，使用另一种方式
+          if (!_inputOk) {
+            debugPrint("第三次尝试请求输入权限");
+            await Future.delayed(Duration(milliseconds: 500));
+            await parent.target?.invokeMethod("start_input");
+          }
         }
         
         // 返回最终的权限状态
+        debugPrint("输入控制权限请求完成，状态: $_inputOk");
         return _inputOk;
       } catch (e) {
         debugPrint("INJECT_EVENTS权限请求出错: $e");
@@ -1006,35 +1201,155 @@ class ServerModel with ChangeNotifier {
     }
   }
   
-  // 请求系统权限 - 主要用于商米设备
-  Future<bool> requestSystemPermissionsWithResult() async {
+  /// 请求系统权限并获取结果（适用于商米平台特有权限）
+  Future<Map<String, dynamic>> requestSystemPermissionsWithResult() async {
     try {
-      debugPrint('请求系统权限');
-      final result = await platformFFI.invokeMethod('request_system_permissions');
-      
-      // 请求后检查权限状态变化
-      final permissionsAfter = await checkSystemPermissions();
-      final allGranted = permissionsAfter.values.every((granted) => granted);
-      
-      debugPrint('请求系统权限结果: $result, 全部授予=$allGranted');
-      return allGranted;
+      final result = await platformFFI.invokeMethod("request_system_permissions");
+      debugPrint("系统权限请求结果: $result");
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      } else {
+        debugPrint("系统权限请求返回了非地图结果: $result");
+        // 如果返回的不是地图，尝试使用标准权限检查方法获取状态
+        final status = await checkSystemPermissions();
+        return status;
+      }
     } catch (e) {
-      debugPrint('请求系统权限出错: $e');
+      debugPrint("请求系统权限异常: $e");
+      return {
+        "error": e.toString(),
+        "request_attempt": false,
+        "is_sunmi_device": await _isSunmiDevice(),
+      };
+    }
+  }
+  
+  /// 请求系统权限（适用于商米平台特有权限）
+  Future<bool> requestSystemPermissions() async {
+    try {
+      final result = await platformFFI.invokeMethod("request_system_permissions");
+      return result == true;
+    } catch (e) {
+      debugPrint("请求系统权限异常: $e");
       return false;
     }
   }
   
-  // 测试屏幕捕获功能
-  Future<bool> testScreenCaptureWithResult() async {
+  /// 检查系统权限状态（适用于商米平台特有权限）
+  Future<Map<String, dynamic>> checkSystemPermissions() async {
     try {
-      debugPrint('测试屏幕捕获功能');
-      final result = await platformFFI.invokeMethod('test_screen_capture');
-      
-      debugPrint('屏幕捕获测试结果: $result');
-      return result is bool ? result : false;
+      final result = await platformFFI.invokeMethod("check_system_permissions");
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      } else {
+        return {
+          "is_ready": false,
+          "is_sunmi_device": await _isSunmiDevice(),
+        };
+      }
     } catch (e) {
-      debugPrint('测试屏幕捕获出错: $e');
-      return false;
+      debugPrint("检查系统权限异常: $e");
+      return {
+        "error": e.toString(),
+        "is_ready": false,
+        "is_sunmi_device": await _isSunmiDevice(),
+      };
+    }
+  }
+  
+  /// 测试屏幕捕获功能并获取详细结果
+  Future<Map<String, dynamic>> testScreenCaptureWithResult() async {
+    try {
+      debugPrint("测试屏幕捕获功能");
+      final result = await platformFFI.invokeMethod("test_screen_capture");
+      
+      if (result is Map) {
+        debugPrint("测试屏幕捕获结果: $result");
+        return Map<String, dynamic>.from(result);
+      } else {
+        debugPrint("测试屏幕捕获返回了非地图结果: $result");
+        return {
+          "capture_status": result == true,
+          "capture_method": "未知",
+          "is_sunmi_device": await _isSunmiDevice(),
+        };
+      }
+    } catch (e) {
+      debugPrint("测试屏幕捕获异常: $e");
+      return {
+        "capture_status": false,
+        "error": e.toString(),
+        "is_sunmi_device": await _isSunmiDevice(),
+      };
+    }
+  }
+  
+  /// 检查是否为商米设备
+  Future<bool> _isSunmiDevice() async {
+    try {
+      final systemPermissions = await platformFFI.invokeMethod("check_system_permissions");
+      if (systemPermissions is Map) {
+        return systemPermissions['is_sunmi_device'] == true;
+      }
+    } catch (e) {
+      debugPrint("检查商米设备时出错: $e");
+    }
+    
+    // 通过其他方式检测：如制造商信息
+    final info = await deviceInfo;
+    final manufacturer = info["manufacturer"]?.toString().toLowerCase() ?? "";
+    final model = info["model"]?.toString().toLowerCase() ?? "";
+    final brand = info["brand"]?.toString().toLowerCase() ?? "";
+    
+    return manufacturer.contains("sunmi") || 
+           model.contains("sunmi") || 
+           brand.contains("sunmi");
+  }
+
+  /// 使用无需权限的方式启动服务（适用于商米设备）
+  Future<void> startServiceWithoutPermission() async {
+    try {
+      debugPrint("尝试使用无需权限方式启动服务（商米设备专用）");
+      
+      try {
+        // 停止现有服务（如果有）
+        await stopService();
+        // 等待服务停止
+        await Future.delayed(Duration(milliseconds: 500));
+      } catch (e) {
+        // 忽略停止服务时的错误
+      }
+      
+      // 启动服务（商米设备专用方式）
+      await platformFFI.invokeMethod('init_service_without_permission');
+      
+      // 稍微等待服务启动
+      await Future.delayed(Duration(milliseconds: 500));
+      
+      // 尝试启动捕获
+      await platformFFI.invokeMethod('start_capture');
+      
+      // 更新服务状态
+      _mediaOk = true;
+      _isStart = true;
+      
+      // 通知监听器状态变化
+      notifyListeners();
+      
+      debugPrint("商米设备无需权限方式启动服务成功");
+      
+      return;
+    } catch (e) {
+      debugPrint("商米设备无需权限方式启动服务失败: $e");
+      
+      // 如果无需权限方式失败，尝试常规方式
+      try {
+        debugPrint("尝试使用常规方式启动服务");
+        await startService();
+      } catch (e) {
+        debugPrint("常规方式启动服务也失败: $e");
+        rethrow;
+      }
     }
   }
 }
