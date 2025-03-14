@@ -129,6 +129,31 @@ class MainActivity : FlutterActivity() {
                 
                 // 返回设备信息
                 result.success(deviceInfo)
+            } else if (call.method == "check_input_permission") {
+                // 检查输入控制权限状态
+                val hasPermission = checkInjectEventsPermission(this)
+                Log.d(logTag, "检查输入控制权限状态: $hasPermission")
+                result.success(hasPermission)
+            } else if (call.method == "start_input_without_dialog") {
+                // 静默请求输入控制权限 (适用于商米设备)
+                try {
+                    val success = requestInjectEventsPermissionSilent()
+                    Log.d(logTag, "静默请求输入控制权限结果: $success")
+                    result.success(success)
+                } catch (e: Exception) {
+                    Log.e(logTag, "静默请求输入控制权限失败: ${e.message}")
+                    result.error("INPUT_PERMISSION_ERROR", e.message, null)
+                }
+            } else if (call.method == "start_input_alternative") {
+                // 使用替代方式请求输入控制权限
+                try {
+                    val success = requestInjectEventsPermissionAlternative()
+                    Log.d(logTag, "替代方式请求输入控制权限结果: $success")
+                    result.success(success)
+                } catch (e: Exception) {
+                    Log.e(logTag, "替代方式请求输入控制权限失败: ${e.message}")
+                    result.error("INPUT_PERMISSION_ERROR", e.message, null)
+                }
             } else {
                 result.notImplemented()
             }
@@ -1039,64 +1064,47 @@ class MainActivity : FlutterActivity() {
     }
 
     // 测试屏幕捕获功能
-    private fun testScreenCapture(): Boolean {
+    private fun testScreenCapture(): Map<String, Any> {
+        val result = HashMap<String, Any>()
         try {
-            Log.d(logTag, "测试屏幕捕获功能")
-            
-            // 检查是否为商米设备
-            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
-                               Build.MODEL.toLowerCase().contains("sunmi") ||
-                               Build.BRAND.toLowerCase().contains("sunmi")
-            
-            // 创建返回结果
-            val resultMap = HashMap<String, Any>()
-            resultMap["is_sunmi_device"] = isSunmiDevice
-            
-            try {
-                // 启动测试服务
-                val intent = Intent(this, MainService::class.java)
-                intent.action = "TEST_SCREEN_CAPTURE" // 使用大写避免混淆
-                startService(intent)
+            if (mainService == null) {
+                Log.d(logTag, "MainService未连接，尝试连接")
+                Intent(activity, MainService::class.java).also {
+                    bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
+                }
                 
-                // 更新结果信息
-                resultMap["capture_method"] = "TEST_INITIATED"
-                resultMap["capture_status"] = true
+                // 等待服务连接
+                var waitTime = 0
+                while (mainService == null && waitTime < 5) {
+                    Thread.sleep(100)
+                    waitTime++
+                }
                 
-                Toast.makeText(
-                    this,
-                    "屏幕捕获测试已启动，请查看日志了解详细结果",
-                    Toast.LENGTH_LONG
-                ).show()
-                
-                // 返回测试结果
-                MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, channelTag).invokeMethod(
-                    "test_screen_capture_result",
-                    resultMap
-                )
-                
-                // 返回true表示测试已启动
-                return true
-            } catch (e: Exception) {
-                Log.e(logTag, "测试屏幕捕获出错: ${e.message}")
-                e.printStackTrace()
-                
-                // 更新错误信息
-                resultMap["capture_status"] = false
-                resultMap["error"] = e.message ?: "未知错误"
-                
-                // 通知Flutter层
-                MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, channelTag).invokeMethod(
-                    "test_screen_capture_result",
-                    resultMap
-                )
-                
-                return false
+                if (mainService == null) {
+                    result["error"] = "MainService连接失败"
+                    result["capture_status"] = false
+                    return result
+                }
             }
+            
+            // 执行测试
+            val testResult = mainService!!.testScreenCapture()
+            
+            result["capture_status"] = testResult.first
+            result["capture_method"] = testResult.second
+            
+            if (!testResult.first) {
+                result["error"] = "屏幕捕获功能测试失败"
+            }
+            
+            Log.d(logTag, "屏幕捕获功能测试结果: $result")
         } catch (e: Exception) {
-            Log.e(logTag, "测试屏幕捕获主函数出错: ${e.message}")
-            e.printStackTrace()
-            return false
+            Log.e(logTag, "测试屏幕捕获功能错误: ${e.message}")
+            result["error"] = e.message ?: "Unknown error"
+            result["capture_status"] = false
         }
+        
+        return result
     }
 
     private fun initService() {
