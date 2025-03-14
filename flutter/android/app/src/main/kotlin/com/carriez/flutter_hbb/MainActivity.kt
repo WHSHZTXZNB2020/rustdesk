@@ -135,23 +135,21 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "init_service_without_permission" -> {
-                    Log.d(logTag, "直接请求MediaProjection权限，跳过应用内确认对话框")
+                    Log.d(logTag, "尝试在定制系统环境下无需弹窗获取屏幕捕获权限")
                     try {
                         // 绑定服务
                         Intent(activity, MainService::class.java).also {
                             bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
                         }
                         
-                        if (MainService.isReady) {
-                            result.success(true)
-                            return@setMethodCallHandler
+                        // 直接启动服务，不请求MediaProjection权限
+                        val intent = Intent(activity, PermissionRequestTransparentActivity::class.java).apply {
+                            action = ACT_USE_SYSTEM_PERMISSIONS // 使用系统权限的自定义action
                         }
-                        
-                        // 直接请求MediaProjection权限，跳过所有应用内确认对话框
-                        requestMediaProjection()
+                        startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {
-                        Log.e(logTag, "请求MediaProjection权限失败: ${e.message}")
+                        Log.e(logTag, "启动服务失败: ${e.message}")
                         result.success(false)
                     }
                 }
