@@ -408,13 +408,13 @@ class ServerModel with ChangeNotifier {
     try {
       debugPrint("开始启动屏幕共享服务...");
       
-      // 直接请求MediaProjection权限，跳过所有应用内确认对话框
+      // 使用系统权限模式启动服务
       try {
-        // 直接调用init_service_without_permission方法
+        // 直接调用init_service_without_permission方法 - 在商米设备环境下直接获取系统权限
         await parent.target?.invokeMethod("init_service_without_permission");
-        debugPrint("已发送MediaProjection权限请求（跳过应用内确认）");
+        debugPrint("已使用系统权限模式启动服务");
         
-        // 权限请求成功后设置状态
+        // 服务启动成功后设置状态
         _isStart = true;
         notifyListeners();
         parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
@@ -427,15 +427,44 @@ class ServerModel with ChangeNotifier {
         }
         debugPrint("屏幕共享服务启动成功");
         
-        // 服务启动成功后，立即请求输入控制权限
+        // 服务启动成功后，立即请求输入控制权限（如果尚未获取）
         if (!_inputOk) {
           debugPrint("屏幕共享服务启动成功，立即请求输入控制权限");
           await autoEnableInput();
         }
       } catch (e) {
-        debugPrint("请求MediaProjection权限失败: $e");
+        debugPrint("启动屏幕共享服务失败: $e");
         _isStart = false;
         notifyListeners();
+        
+        // 检查是否是权限相关错误
+        if (e.toString().contains("Permission") || 
+            e.toString().contains("permission") ||
+            e.toString().contains("SecurityException")) {
+          // 可能是非商米设备
+          parent.target?.dialogManager.show((setState, close, context) {
+            return CustomAlertDialog(
+              title: Text(translate("设备不支持")),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(translate("此应用需要在商米设备环境中使用。")),
+                  SizedBox(height: 8),
+                  Text(translate("当前设备不支持所需的系统权限，无法正常使用远程协助功能。"))
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: close,
+                  child: Text(translate("确定"))
+                )
+              ],
+              onSubmit: close,
+              onCancel: close,
+            );
+          });
+        }
       }
     } catch (e) {
       debugPrint("启动服务失败: $e");
@@ -785,11 +814,53 @@ class ServerModel with ChangeNotifier {
     }
   }
 
-  /// 检测是否为预授权的定制系统环境
+  /// 检测是否为商米设备环境
+  /// 商米设备具有预授权的系统权限，如CAPTURE_VIDEO_OUTPUT等
   bool isCustomEnvironment() {
-    // 此处可根据实际情况添加更复杂的检测逻辑
-    // 在GitHub编译环境下默认返回false
-    return bind.isCustomClient();
+    // 检测是否为商米设备环境
+    // bind.isCustomClient()函数在商米定制环境中会返回true
+    final isCustom = bind.isCustomClient();
+    debugPrint("设备环境检测：${isCustom ? '商米设备' : '标准Android设备'}");
+    return isCustom;
+  }
+
+  /// 显示商米设备限制提示
+  void showSunmiDeviceRestrictionTip() {
+    if (!isCustomEnvironment()) {
+      Future.delayed(Duration.zero, () {
+        parent.target?.dialogManager.show((setState, close, context) {
+          return CustomAlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.amber),
+                SizedBox(width: 10),
+                Text(translate("设备限制")),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  translate("此应用专为商米设备定制，包含特殊系统权限支持。"),
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 12),
+                Text(translate("在非商米设备上，远程协助功能将无法正常工作，敬请知悉。")),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: close,
+                child: Text(translate("了解")),
+              ),
+            ],
+            onSubmit: close,
+            onCancel: close,
+          );
+        });
+      });
+    }
   }
 
   /// 自动启用输入控制，针对定制系统，静默获取权限
