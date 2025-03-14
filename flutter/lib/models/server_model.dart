@@ -1007,7 +1007,7 @@ class ServerModel with ChangeNotifier {
   }
   
   // 请求系统权限 - 主要用于商米设备
-  Future<bool> requestSystemPermissions() async {
+  Future<bool> requestSystemPermissionsWithResult() async {
     try {
       debugPrint('请求系统权限');
       final result = await platformFFI.invokeMethod('request_system_permissions');
@@ -1025,7 +1025,7 @@ class ServerModel with ChangeNotifier {
   }
   
   // 测试屏幕捕获功能
-  Future<bool> testScreenCapture() async {
+  Future<bool> testScreenCaptureWithResult() async {
     try {
       debugPrint('测试屏幕捕获功能');
       final result = await platformFFI.invokeMethod('test_screen_capture');
