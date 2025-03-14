@@ -61,6 +61,44 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import android.graphics.Point
 import java.util.concurrent.atomic.AtomicBoolean
+import android.app.Service
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.res.Configuration
+import android.content.pm.ServiceInfo
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.Message
+import android.os.PowerManager
+import android.os.Process
+import android.util.DisplayMetrics
+import android.util.Log
+import android.view.WindowManager
+import android.view.Display
+import android.view.Surface
+import android.view.SurfaceControl
+import android.view.SurfaceTexture
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.provider.Settings
+import android.widget.Toast
+import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -1868,10 +1906,10 @@ class MainService : Service() {
         try {
             // 这个权限无法直接通过PackageManager检查
             // 我们需要检查是否有相关服务运行
-            val isAccessibilityServiceRunning = InputService.isAccessibilityServiceRunning(this)
+            val isAccessibilityServiceRunning = isAccessibilityServiceRunning(this)
             
             val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(this)
+                android.provider.Settings.canDrawOverlays(this)
             } else {
                 true // 低版本Android默认允许
             }
@@ -1885,6 +1923,21 @@ class MainService : Service() {
             Log.e(logTag, "检查INJECT_EVENTS权限时出错: ${e.message}")
             return false
         }
+    }
+    
+    /**
+     * 检查辅助功能服务是否运行
+     */
+    private fun isAccessibilityServiceRunning(context: Context): Boolean {
+        val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+        val enabledServices = manager.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        
+        for (service in enabledServices) {
+            if (service.id.contains(context.packageName)) {
+                return true
+            }
+        }
+        return false
     }
     
     /**
