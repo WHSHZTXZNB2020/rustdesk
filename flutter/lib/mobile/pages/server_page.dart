@@ -250,6 +250,19 @@ class _ServerPageState extends State<ServerPage> {
                                     ),
                                   ],
                                 ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          gFFI.serverModel.requestSystemPermissions();
+                                        },
+                                        child: Text(translate("请求系统权限")),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
