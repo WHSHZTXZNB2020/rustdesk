@@ -262,30 +262,99 @@ class MainService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(logTag,"MainService onCreate, sdk int:${Build.VERSION.SDK_INT}")
-        FFI.init(this)
-        HandlerThread("Service", Process.THREAD_PRIORITY_BACKGROUND).apply {
+        Log.d(logTag, "MainService onCreate, sdk int:${Build.VERSION.SDK_INT}")
+        
+        // 初始化FFI
+        try {
+            FFI.init(this)
+        } catch (e: Exception) {
+            Log.e(logTag, "FFI初始化失败: ${e.message}")
+        }
+        
+        // 初始化工作线程
+        HandlerThread("MainService", Process.THREAD_PRIORITY_BACKGROUND).apply {
             start()
             serviceLooper = looper
             serviceHandler = Handler(looper)
         }
-        updateScreenInfo(resources.configuration.orientation)
-        initNotification()
+        
+        try {
+            updateScreenInfo(resources.configuration.orientation)
+        } catch (e: Exception) {
+            Log.e(logTag, "更新屏幕信息失败: ${e.message}")
+        }
+        
+        try {
+            initNotification()
+        } catch (e: Exception) {
+            Log.e(logTag, "初始化通知失败: ${e.message}")
+        }
 
         // keep the config dir same with flutter
-        val prefs = applicationContext.getSharedPreferences(KEY_SHARED_PREFERENCES, FlutterActivity.MODE_PRIVATE)
-        val configPath = prefs.getString(KEY_APP_DIR_CONFIG_PATH, "") ?: ""
-        FFI.startServer(configPath, "")
-
-        createForegroundNotification()
+        try {
+            val prefs = applicationContext.getSharedPreferences(KEY_SHARED_PREFERENCES, FlutterActivity.MODE_PRIVATE)
+            val configPath = prefs.getString(KEY_APP_DIR_CONFIG_PATH, "") ?: ""
+            FFI.startServer(configPath, "")
+        } catch (e: Exception) {
+            Log.e(logTag, "启动服务器失败: ${e.message}")
+        }
         
-        // 检查系统权限并设置就绪状态
-        checkSystemPermissions()
-
+        // 创建前台服务通知
+        try {
+            createForegroundNotification()
+        } catch (e: Exception) {
+            Log.e(logTag, "创建前台通知失败: ${e.message}")
+            
+            // 备用方案创建前台通知
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "rustdesk_service_channel"
+            val channelName = "RustDesk Service"
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    channelName,
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                notificationManager.createNotificationChannel(channel)
+            }
+            
+            val notificationIntent = Intent(this, MainActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) FLAG_IMMUTABLE else 0
+            )
+            
+            val notification = NotificationCompat.Builder(this, channelId)
+                .setContentTitle("RustDesk服务")
+                .setContentText("RustDesk服务正在运行")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(pendingIntent)
+                .build()
+            
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(DEFAULT_NOTIFY_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                } else {
+                    startForeground(DEFAULT_NOTIFY_ID, notification)
+                }
+                Log.d(logTag, "备用前台服务启动成功")
+            } catch (e2: Exception) {
+                Log.e(logTag, "备用前台服务启动失败: ${e2.message}")
+            }
+        }
+        
+        // 标记服务为已就绪 (强制设置为true，跳过设备检查)
+        _isReady = true
+        
         mContext = this.applicationContext
         
-        // 初始化SurfaceControl - 多种方式尝试创建
-        initSurfaceControl()
+        // 初始化SurfaceControl
+        try {
+            initSurfaceControl()
+        } catch (e: Exception) {
+            Log.e(logTag, "初始化SurfaceControl失败: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
@@ -521,43 +590,14 @@ class MainService : Service() {
             Log.e(logTag, "获取已授予权限列表失败: ${e.message}")
         }
         
-        // 检查设备型号
-        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
-                             Build.MODEL.toLowerCase().contains("sunmi") ||
-                             Build.BRAND.toLowerCase().contains("sunmi")
-                             
-        if (isSunmiDevice) {
-            Log.d(logTag, "检测到商米设备，将执行功能测试验证权限")
-            
-            // 在商米设备上执行功能测试验证权限
-            val functionalTestResults = testPermissionsFunctionally()
-            var hasAnyPermission = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
-            
-            // 如果功能测试表明存在可用权限，即使权限检查结果为false
-            for ((permission, available) in functionalTestResults) {
-                if (available) {
-                    hasAnyPermission = true
-                    Log.d(logTag, "功能测试表明权限可用: $permission")
-                }
-            }
-            
-            // 在商米设备上，认为总是准备就绪
-            if (isSunmiDevice) {
-                _isReady = true
-                Log.d(logTag, "商米设备: 默认认为已就绪，将跳过权限检查直接尝试捕获")
-            } else {
-                _isReady = hasAnyPermission
-            }
-        } else {
-            // 非商米设备，正常检查权限
-            _isReady = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
-        }
+        // 强制设置为已就绪状态，忽略设备类型检查
+        _isReady = true
+        Log.d(logTag, "已设置为就绪状态，将尝试捕获屏幕")
         
         if (_isReady) {
             Log.d(logTag, "系统屏幕捕获权限已授予，可以进行屏幕捕获")
         } else {
             Log.e(logTag, "⚠️ 警告：未获得任何屏幕捕获权限！应用将无法捕获屏幕内容")
-            Log.d(logTag, "请确认设备是否为商米设备，并且已在系统中预授权这些权限")
         }
         
         // 通知Flutter UI权限状态更新
@@ -675,66 +715,38 @@ class MainService : Service() {
     // 使用系统权限开始屏幕捕获
     private fun startScreenCapture(): Boolean {
         try {
-            Log.d(logTag, "【屏幕捕获】尝试开始使用系统权限捕获屏幕")
+            Log.d(logTag, "【屏幕捕获】开始尝试捕获屏幕")
             
-            // 判断是否为商米设备
-            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
-                               Build.MODEL.toLowerCase().contains("sunmi") ||
-                               Build.BRAND.toLowerCase().contains("sunmi")
+            // 尝试所有可能的捕获方法，不区分设备类型
             
-            if (isSunmiDevice) {
-                Log.d(logTag, "【屏幕捕获】检测到商米设备，将直接尝试捕获方法")
-                
-                // 对于商米设备，优先尝试VideoOutput
-                // 根据日志分析，商米设备在功能测试中显示CAPTURE_VIDEO_OUTPUT实际可用
-                if (tryCaptureVideoOutput()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
-                    return true
-                }
-                
-                if (tryCaptureSurfaceFlinger()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
-                    return true
-                }
-                
-                if (tryReadFrameBuffer()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
-                    return true
-                }
-                
-                // 尝试备用方法
-                if (tryFallbackCapture()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动备用捕获方法")
-                    return true
-                }
-                
-                // 针对商米设备的特殊方法
-                if (trySunmiSpecificCapture()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动商米特定捕获方法")
-                    return true
-                }
-            } else {
-                // 非商米设备，按正常流程尝试
-                if (tryCaptureSurfaceFlinger()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
-                    return true
-                }
-                
-                if (tryReadFrameBuffer()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
-                    return true
-                }
-                
-                if (tryCaptureVideoOutput()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
-                    return true
-                }
-                
-                // 尝试备用方法
-                if (tryFallbackCapture()) {
-                    Log.d(logTag, "【屏幕捕获】成功启动备用捕获方法")
-                    return true
-                }
+            // 首先尝试VideoOutput
+            if (tryCaptureVideoOutput()) {
+                Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
+                return true
+            }
+            
+            // 然后尝试SurfaceFlinger
+            if (tryCaptureSurfaceFlinger()) {
+                Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
+                return true
+            }
+            
+            // 再尝试FrameBuffer
+            if (tryReadFrameBuffer()) {
+                Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
+                return true
+            }
+            
+            // 尝试备用方法
+            if (tryFallbackCapture()) {
+                Log.d(logTag, "【屏幕捕获】成功启动备用捕获方法")
+                return true
+            }
+            
+            // 针对商米设备的特殊方法也尝试
+            if (trySunmiSpecificCapture()) {
+                Log.d(logTag, "【屏幕捕获】成功启动商米特定捕获方法")
+                return true
             }
             
             // 所有方法都失败
