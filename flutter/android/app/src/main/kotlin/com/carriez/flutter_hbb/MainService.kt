@@ -1,24 +1,31 @@
 package com.carriez.flutter_hbb
 
 import ffi.FFI
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import org.json.JSONException
+import org.json.JSONObject
+import java.nio.ByteBuffer
+import java.io.FileInputStream
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+import kotlin.math.max
+import kotlin.math.min
 
-/**
- * Capture screen,get video and audio,send to rust.
- * Dispatch notifications
- *
- * Modified to use system permissions for screen capture
- */
-
+// Android imports - organized to avoid conflicts
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.*
-import android.app.PendingIntent.FLAG_IMMUTABLE
-import android.app.PendingIntent.FLAG_UPDATE_CURRENT
+import android.app.Activity
+import android.app.ActivityManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Color
@@ -36,30 +43,24 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.view.Surface
-import android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
 import android.view.SurfaceControl
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent.FLAG_IMMUTABLE
+import android.app.PendingIntent.FLAG_UPDATE_CURRENT
+import android.app.ServiceInfo
+import android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
+import android.view.accessibility.AccessibilityServiceInfo
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.plugin.common.BinaryMessenger
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
-import java.util.concurrent.Executors
-import kotlin.concurrent.thread
-import org.json.JSONException
-import org.json.JSONObject
-import java.nio.ByteBuffer
-import java.io.FileInputStream
-import kotlin.math.max
-import kotlin.math.min
-import java.util.concurrent.atomic.AtomicBoolean
-import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
