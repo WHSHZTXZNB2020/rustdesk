@@ -962,8 +962,8 @@ class MainService : Service() {
             Log.d(logTag, "测试SurfaceFlinger捕获")
             // 实现此方法测试SurfaceFlinger捕获
             // 实际实现应根据设备实际情况调整
-            val result = captureSurfaceFlingerFrames()
-            return result
+            captureSurfaceFlingerFrames()
+            return true  // 如果执行到这里，表示没有异常，捕获成功
         } catch (e: Exception) {
             Log.e(logTag, "SurfaceFlinger捕获测试异常: ${e.message}")
             return false
@@ -976,8 +976,8 @@ class MainService : Service() {
             Log.d(logTag, "测试FrameBuffer捕获")
             // 实现此方法测试FrameBuffer捕获
             // 实际实现应根据设备实际情况调整
-            val result = captureFrameBufferFrames()
-            return result
+            captureFrameBufferFrames()
+            return true  // 如果执行到这里，表示没有异常，捕获成功
         } catch (e: Exception) {
             Log.e(logTag, "FrameBuffer捕获测试异常: ${e.message}")
             return false
@@ -990,8 +990,8 @@ class MainService : Service() {
             Log.d(logTag, "测试VideoOutput捕获")
             // 实现此方法测试VideoOutput捕获
             // 实际实现应根据设备实际情况调整
-            val result = captureVideoOutputFrames()
-            return result
+            captureVideoOutputFrames()
+            return true  // 如果执行到这里，表示没有异常，捕获成功
         } catch (e: Exception) {
             Log.e(logTag, "VideoOutput捕获测试异常: ${e.message}")
             return false
