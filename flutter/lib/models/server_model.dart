@@ -903,6 +903,48 @@ class ServerModel with ChangeNotifier {
     }
     return false;
   }
+
+  Future<void> checkSystemPermissionStatus() async {
+    if (!isAndroid) return;
+    try {
+      final result = await platformFFI.invokeMethod('check_system_permissions');
+      if (result != null && result is Map) {
+        final status = StringBuilder();
+        status.writeln("系统权限状态:");
+        status.writeln("CAPTURE_VIDEO_OUTPUT: ${result['capture_video_output']}");
+        status.writeln("READ_FRAME_BUFFER: ${result['read_frame_buffer']}");
+        status.writeln("ACCESS_SURFACE_FLINGER: ${result['access_surface_flinger']}");
+        status.writeln("权限总体状态: ${result['is_ready']}");
+        
+        // 显示权限状态
+        showToast(status.toString(), duration: Duration(seconds: 10));
+      }
+    } catch (e) {
+      debugPrint('检查系统权限状态失败: $e');
+    }
+  }
+
+  Future<void> testScreenCapture() async {
+    if (!isAndroid) return;
+    try {
+      final result = await platformFFI.invokeMethod('test_screen_capture');
+      if (result != null && result is Map) {
+        final status = StringBuilder();
+        status.writeln("屏幕捕获测试结果:");
+        status.writeln("捕获方法: ${result['capture_method']}");
+        status.writeln("捕获状态: ${result['capture_status']}");
+        if (result.containsKey('error')) {
+          status.writeln("错误: ${result['error']}");
+        }
+        
+        // 显示捕获测试结果
+        showToast(status.toString(), duration: Duration(seconds: 10));
+      }
+    } catch (e) {
+      debugPrint('测试屏幕捕获失败: $e');
+      showToast('测试屏幕捕获失败: $e', duration: Duration(seconds: 5));
+    }
+  }
 }
 
 enum ClientType {
@@ -1009,4 +1051,22 @@ Future<void> showClientsMayNotBeChangedAlert(FFI? ffi) async {
       onCancel: close,
     );
   });
+}
+
+// StringBuiler类用于构建多行字符串
+class StringBuilder {
+  final StringBuffer _buffer = StringBuffer();
+
+  void write(Object obj) {
+    _buffer.write(obj);
+  }
+
+  void writeln([Object obj = '']) {
+    _buffer.writeln(obj);
+  }
+
+  @override
+  String toString() {
+    return _buffer.toString();
+  }
 }
