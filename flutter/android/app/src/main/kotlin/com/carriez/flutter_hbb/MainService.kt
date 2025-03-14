@@ -356,12 +356,19 @@ class MainService : Service() {
                         }
                     }
                 }
+                else -> {
+                    // 默认处理
+                    Log.d(logTag, "未指定特殊启动方式，使用默认方式")
+                }
             }
         }
         
         // 如果通过EXT_INIT_FROM_BOOT启动，调用FFI.startService
         if (intent?.getBooleanExtra(EXT_INIT_FROM_BOOT, false) == true) {
             FFI.startService()
+        } else {
+            // 非启动自动启动，无需特殊处理
+            Log.d(logTag, "非开机自动启动，无需特殊处理")
         }
         
         return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
@@ -423,11 +430,14 @@ class MainService : Service() {
                 try {
                     // If not call acquireLatestImage, listener will not be called again
                     imageReader.acquireLatestImage().use { image ->
-                        if (image == null || !isStart) return@setOnImageAvailableListener
-                        val planes = image.planes
-                        val buffer = planes[0].buffer
-                        buffer.rewind()
-                        FFI.onVideoFrameUpdate(buffer)
+                        if (image == null || !isStart) {
+                            return@setOnImageAvailableListener
+                        } else {
+                            val planes = image.planes
+                            val buffer = planes[0].buffer
+                            buffer.rewind()
+                            FFI.onVideoFrameUpdate(buffer)
+                        }
                     }
                 } catch (ignored: Exception) {
                     Log.e(logTag, "Error processing image: ${ignored.message}")
