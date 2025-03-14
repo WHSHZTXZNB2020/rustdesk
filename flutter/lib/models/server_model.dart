@@ -917,7 +917,7 @@ class ServerModel with ChangeNotifier {
         status.writeln("权限总体状态: ${result['is_ready']}");
         
         // 显示权限状态
-        showToast(status.toString(), duration: Duration(seconds: 10));
+        showToast(status.toString(), timeout: Duration(seconds: 10));
       }
     } catch (e) {
       debugPrint('检查系统权限状态失败: $e');
@@ -938,11 +938,11 @@ class ServerModel with ChangeNotifier {
         }
         
         // 显示捕获测试结果
-        showToast(status.toString(), duration: Duration(seconds: 10));
+        showToast(status.toString(), timeout: Duration(seconds: 10));
       }
     } catch (e) {
       debugPrint('测试屏幕捕获失败: $e');
-      showToast('测试屏幕捕获失败: $e', duration: Duration(seconds: 5));
+      showToast('测试屏幕捕获失败: $e', timeout: Duration(seconds: 5));
     }
   }
 }
