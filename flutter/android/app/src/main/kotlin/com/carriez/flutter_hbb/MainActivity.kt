@@ -380,7 +380,7 @@ class MainActivity : FlutterActivity() {
                                     // 权限被拒绝，尝试另一种方式
                                     try {
                                         Log.d(logTag, "尝试另一种方式获取输入控制权限")
-                                        requestInjectEventsPermissionAlternative(activity)
+                                        requestInjectEventsPermissionAlternative()
                                     } catch (e: Exception) {
                                         Log.e(logTag, "Alternative method failed: ${e.message}")
                                     }
@@ -1247,31 +1247,57 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    // 尝试使用替代方式请求输入权限
-    private fun requestInjectEventsPermissionAlternative(activity: Activity) {
-        Log.d(logTag, "尝试替代方式获取INJECT_EVENTS权限")
+    /**
+     * 使用替代方式请求输入控制权限
+     */
+    private fun requestInjectEventsPermissionAlternative(): Boolean {
+        Log.d(logTag, "使用替代方式请求输入控制权限")
         try {
-            // 方式1: 尝试通过Intent方式请求
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            activity.startActivity(intent)
-            Toast.makeText(
-                activity,
-                "请在辅助功能中启用输入控制服务",
-                Toast.LENGTH_LONG
-            ).show()
-        } catch (e: Exception) {
-            Log.e(logTag, "替代方式1失败: ${e.message}")
-            
-            // 方式2: 尝试使用辅助功能服务
+            // 尝试直接启动InputService
             try {
-                val intent = Intent(activity, InputService::class.java)
-                activity.startService(intent)
-                Log.d(logTag, "已尝试直接启动InputService")
+                InputService(this)
+                Log.d(logTag, "InputService初始化成功")
+                
+                // 检查权限状态
+                val hasPermission = checkInjectEventsPermission(this)
+                if (hasPermission) {
+                    Log.d(logTag, "成功获取INJECT_EVENTS权限")
+                    return true
+                }
             } catch (e: Exception) {
-                Log.e(logTag, "替代方式2失败: ${e.message}")
+                Log.e(logTag, "InputService初始化失败: ${e.message}")
             }
+            
+            // 尝试使用Intent请求权限
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+            
+            // 打开悬浮窗权限设置
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val overlayIntent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                overlayIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(overlayIntent)
+            }
+            
+            return true
+        } catch (e: Exception) {
+            Log.e(logTag, "替代方式请求INJECT_EVENTS权限失败: ${e.message}")
+            return false
         }
+    }
+    
+    /**
+     * 判断是否为商米设备
+     */
+    private fun isSunmiDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER.toLowerCase()
+        val model = Build.MODEL.toLowerCase()
+        val brand = Build.BRAND.toLowerCase()
+        
+        return manufacturer.contains("sunmi") || 
+               model.contains("sunmi") || 
+               brand.contains("sunmi")
     }
     
     /**
