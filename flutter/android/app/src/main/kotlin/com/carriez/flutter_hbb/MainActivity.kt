@@ -1005,4 +1005,40 @@ class MainActivity : FlutterActivity() {
         }
         return false
     }
+
+    private fun initService() {
+        // 这个方法实际上应该在MainActivity类内部
+        // 对应Java层的initService方法
+        Log.d(logTag, "initService called")
+        
+        // 如果已经绑定了服务，不需要再次绑定
+        if (mainService != null) {
+            return
+        }
+        
+        // 绑定MainService服务
+        Intent(activity, MainService::class.java).also {
+            bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    private fun startService() {
+        Log.d(logTag, "startService called")
+        // 这里可以添加启动服务的逻辑
+        if (mainService != null) {
+            mainService?.let {
+                // 调用服务中的方法启动服务
+                it.start()
+            }
+        }
+    }
+
+    private fun stopService() {
+        Log.d(logTag, "stopService called")
+        // 这里可以添加停止服务的逻辑
+        mainService?.let {
+            // 调用服务中的方法停止服务
+            it.destroy()
+        }
+    }
 }
