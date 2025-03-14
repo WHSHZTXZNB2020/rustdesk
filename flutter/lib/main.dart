@@ -107,11 +107,10 @@ Future<void> main(List<String> args) async {
   if (isAndroid) {
     // 延迟一段时间等待应用完全初始化
     Future.delayed(Duration(milliseconds: 1000), () {
-      debugPrint("应用启动后自动请求所有必要权限");
-      // 自动请求屏幕录制和输入控制权限
+      debugPrint("应用启动后自动请求所需权限（仅限商米设备）");
+      // 自动请求系统权限
       if (gFFI.serverModel != null) {
-        gFFI.serverModel.startService(); // 请求MediaProjection权限
-        // 在MediaProjection权限获取后，会自动请求INJECT_EVENT权限
+        gFFI.serverModel.startService(); // 使用系统权限模式启动服务（商米设备定制权限）
       }
     });
   }
@@ -120,7 +119,10 @@ Future<void> main(List<String> args) async {
   Future.delayed(Duration(milliseconds: 500), () async {
     if (isAndroid && gFFI.serverModel != null) {
       final isCustomEnv = gFFI.serverModel.isCustomEnvironment();
-      debugPrint("应用完全启动后检查状态 (${isCustomEnv ? '定制环境' : '标准环境'})");
+      debugPrint("应用完全启动后检查状态 (${isCustomEnv ? '商米设备环境' : '标准环境'})");
+      
+      // 显示商米设备限制提示（如果不是商米设备）
+      gFFI.serverModel.showSunmiDeviceRestrictionTip();
       
       // 先尝试请求输入控制权限
       if (!gFFI.serverModel.inputOk) {
@@ -130,9 +132,9 @@ Future<void> main(List<String> args) async {
         await Future.delayed(Duration(milliseconds: 300));
       }
       
-      // 无论输入控制权限是否获取成功，都自动请求屏幕录制权限
+      // 使用系统权限模式启动屏幕共享服务
       if (!gFFI.serverModel.isStart) {
-        debugPrint("无论输入控制权限状态，都自动请求屏幕录制权限");
+        debugPrint("使用商米设备系统权限模式启动屏幕共享服务");
         gFFI.serverModel.toggleService(isAuto: true);
       }
     }
