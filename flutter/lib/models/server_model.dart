@@ -1375,6 +1375,59 @@ class ServerModel with ChangeNotifier {
       debugPrint('检查系统权限状态失败: $e');
     }
   }
+
+  /// 检查系统权限状态，返回权限信息Map
+  Future<Map<String, dynamic>> checkSystemPermissionStatus() async {
+    if (!isAndroid) return {"error": "非Android平台"};
+    try {
+      final result = await platformFFI.invokeMethod('check_system_permissions');
+      if (result != null && result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return {"error": "未获取到权限信息"};
+    } catch (e) {
+      debugPrint('检查系统权限状态失败: $e');
+      return {"error": e.toString()};
+    }
+  }
+
+  /// 测试屏幕捕获功能
+  Future<void> testScreenCapture() async {
+    if (!isAndroid) return;
+    try {
+      final result = await platformFFI.invokeMethod('test_screen_capture');
+      if (result != null && result is Map) {
+        final status = StringBuilder();
+        status.writeln("屏幕捕获测试结果:");
+        status.writeln("捕获方法: ${result['capture_method']}");
+        status.writeln("捕获状态: ${result['capture_status']}");
+        if (result.containsKey('error')) {
+          status.writeln("错误: ${result['error']}");
+        }
+        
+        // 显示捕获测试结果
+        showToast(status.toString(), timeout: Duration(seconds: 10));
+      }
+    } catch (e) {
+      debugPrint('测试屏幕捕获失败: $e');
+      showToast('测试屏幕捕获失败: $e', timeout: Duration(seconds: 5));
+    }
+  }
+  
+  /// 请求系统权限
+  Future<Map<String, dynamic>> requestSystemPermissions() async {
+    if (!isAndroid) return {"error": "非Android平台"};
+    try {
+      final result = await platformFFI.invokeMethod('request_system_permissions');
+      if (result != null && result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return {"success": false, "error": "未获取到请求结果"};
+    } catch (e) {
+      debugPrint('请求系统权限失败: $e');
+      return {"success": false, "error": e.toString()};
+    }
+  }
 }
 
 enum ClientType {
