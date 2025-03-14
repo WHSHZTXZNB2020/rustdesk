@@ -441,15 +441,34 @@ class MainService : Service() {
         val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
         val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
         
-        Log.d(logTag, "System permissions: CAPTURE_VIDEO_OUTPUT=$captureVideoOutput, READ_FRAME_BUFFER=$readFrameBuffer, ACCESS_SURFACE_FLINGER=$accessSurfaceFlinger")
+        // 添加更多详细日志
+        Log.d(logTag, "========== 系统权限详细检查 ==========")
+        Log.d(logTag, "包名: $packageName")
+        Log.d(logTag, "系统版本: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})")
+        Log.d(logTag, "设备型号: ${Build.MANUFACTURER} ${Build.MODEL}")
+        Log.d(logTag, "CAPTURE_VIDEO_OUTPUT 权限状态: $captureVideoOutput (${pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName)})")
+        Log.d(logTag, "READ_FRAME_BUFFER 权限状态: $readFrameBuffer (${pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName)})")
+        Log.d(logTag, "ACCESS_SURFACE_FLINGER 权限状态: $accessSurfaceFlinger (${pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName)})")
+        
+        // 尝试获取所有已授予的权限
+        try {
+            val packageInfo = pm.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
+            val grantedPermissions = packageInfo.requestedPermissions.filterIndexed { index, _ -> 
+                (packageInfo.requestedPermissionsFlags[index] and PackageManager.PERMISSION_GRANTED) != 0 
+            }
+            Log.d(logTag, "已授予的所有权限: ${grantedPermissions.joinToString(", ")}")
+        } catch (e: Exception) {
+            Log.e(logTag, "获取已授予权限列表失败: ${e.message}")
+        }
         
         // 有任一系统权限即可捕获屏幕
         _isReady = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
         
         if (_isReady) {
-            Log.d(logTag, "System screen capture permissions granted")
+            Log.d(logTag, "系统屏幕捕获权限已授予，可以进行屏幕捕获")
         } else {
-            Log.e(logTag, "No screen capture permissions granted!")
+            Log.e(logTag, "⚠️ 警告：未获得任何屏幕捕获权限！应用将无法捕获屏幕内容")
+            Log.d(logTag, "请确认设备是否为商米设备，并且已在系统中预授权这些权限")
         }
         
         // 通知Flutter UI权限状态更新
@@ -579,6 +598,12 @@ class MainService : Service() {
             
             Log.d(logTag, "【屏幕捕获】权限状态: CAPTURE_VIDEO_OUTPUT=$hasCaptureVideoOutput, READ_FRAME_BUFFER=$hasReadFrameBuffer, ACCESS_SURFACE_FLINGER=$hasAccessSurfaceFlinger")
             
+            // 备用方案：如果没有任何系统权限但服务已标记为就绪，尝试使用备用方法
+            if (!hasCaptureVideoOutput && !hasReadFrameBuffer && !hasAccessSurfaceFlinger && _isReady) {
+                Log.d(logTag, "【屏幕捕获】尝试使用备用方法捕获屏幕")
+                return tryFallbackCapture()
+            }
+            
             // 按优先级尝试不同捕获方法
             if (hasAccessSurfaceFlinger && tryCaptureSurfaceFlinger()) {
                 Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
@@ -593,6 +618,12 @@ class MainService : Service() {
             if (hasCaptureVideoOutput && tryCaptureVideoOutput()) {
                 Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
                 return true
+            }
+            
+            // 如果所有方法都失败，但服务被标记为就绪，尝试备用方法
+            if (_isReady) {
+                Log.d(logTag, "【屏幕捕获】所有系统权限方法均失败，尝试备用方法")
+                return tryFallbackCapture()
             }
             
             Log.e(logTag, "【屏幕捕获】所有捕获方法均失败")
@@ -994,6 +1025,27 @@ class MainService : Service() {
             return true  // 如果执行到这里，表示没有异常，捕获成功
         } catch (e: Exception) {
             Log.e(logTag, "VideoOutput捕获测试异常: ${e.message}")
+            return false
+        }
+    }
+
+    // 尝试备用捕获方法 - 使用VirtualDisplay直接捕获
+    private fun tryFallbackCapture(): Boolean {
+        try {
+            Log.d(logTag, "【屏幕捕获】尝试使用备用方法 - 使用VirtualDisplay直接捕获")
+            
+            // 尝试创建VirtualDisplay进行捕获
+            virtualDisplay = createVirtualDisplay()
+            if (virtualDisplay != null) {
+                // 启动捕获线程
+                startCaptureThread("fallback")
+                return true
+            }
+            
+            Log.e(logTag, "【屏幕捕获】备用方法也失败了")
+            return false
+        } catch (e: Exception) {
+            Log.e(logTag, "【屏幕捕获】备用方法出错: ${e.message}")
             return false
         }
     }
