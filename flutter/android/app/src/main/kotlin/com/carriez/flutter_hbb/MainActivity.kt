@@ -34,6 +34,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 import android.content.pm.PackageManager
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 
 
 class MainActivity : FlutterActivity() {
@@ -310,7 +311,7 @@ class MainActivity : FlutterActivity() {
                             resultMap["capture_method"] = "已有服务正在运行"
                             resultMap["capture_status"] = "服务已启动，但可能未正确捕获"
                             result.success(resultMap)
-                            return@MethodCallHandler
+                            return@setMethodCallHandler
                         }
                         
                         // 检查系统权限
@@ -324,7 +325,7 @@ class MainActivity : FlutterActivity() {
                             resultMap["capture_status"] = "失败"
                             resultMap["error"] = "没有获得任何屏幕捕获权限"
                             result.success(resultMap)
-                            return@MethodCallHandler
+                            return@setMethodCallHandler
                         }
                         
                         // 启动临时服务测试屏幕捕获
