@@ -325,12 +325,44 @@ class MainService : Service() {
         
         createForegroundNotification()
 
+        // 先检查系统权限并设置就绪状态
+        checkSystemPermissions()
+        
+        // 处理不同的启动action
+        intent?.let {
+            when (it.action) {
+                ACT_USE_SYSTEM_PERMISSIONS -> {
+                    // 直接使用系统权限模式，不使用MediaProjection
+                    Log.d(logTag, "使用系统权限模式启动，不请求MediaProjection")
+                    // 已在checkSystemPermissions设置了_isReady，无需额外处理
+                    
+                    // 自动启动屏幕捕获
+                    if (_isReady && !_isStart) {
+                        startCapture()
+                    }
+                }
+                ACT_INIT_MEDIA_PROJECTION_AND_SERVICE -> {
+                    // 兼容传统MediaProjection方式
+                    Log.d(logTag, "使用传统MediaProjection方式启动")
+                    
+                    // 如果系统权限就绪，优先使用系统权限
+                    if (_isReady && !_isStart) {
+                        startCapture()
+                    } else {
+                        // 尝试使用MediaProjection
+                        val data = it.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)
+                        if (data != null) {
+                            // TODO: 如需保留MediaProjection支持，在此处理MediaProjection初始化
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 如果通过EXT_INIT_FROM_BOOT启动，调用FFI.startService
         if (intent?.getBooleanExtra(EXT_INIT_FROM_BOOT, false) == true) {
             FFI.startService()
         }
-        
-        // 检查系统权限并设置就绪状态
-        checkSystemPermissions()
         
         return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
     }
@@ -617,11 +649,17 @@ class MainService : Service() {
         // 在您的定制系统上，有了ACCESS_SURFACE_FLINGER权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "Using SurfaceFlinger API to capture screen")
-        while (isCapturing) {
-            // ImageReader会通过onImageAvailableListener自动接收图像
-            // 不需要在这里手动获取
-            Thread.sleep(5) // 短暂睡眠以减少CPU使用
+        Log.d(logTag, "正在使用SurfaceFlinger API捕获屏幕，该API基于系统权限无需用户确认")
+        try {
+            while (isCapturing) {
+                // ImageReader会通过onImageAvailableListener自动接收图像
+                // 不需要在这里手动获取
+                Thread.sleep(5) // 短暂睡眠以减少CPU使用
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "SurfaceFlinger捕获出错: ${e.message}")
+        } finally {
+            Log.d(logTag, "SurfaceFlinger捕获已停止")
         }
     }
     
@@ -630,11 +668,17 @@ class MainService : Service() {
         // 在您的定制系统上，有了READ_FRAME_BUFFER权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "Using FrameBuffer API to capture screen")
-        while (isCapturing) {
-            // ImageReader会通过onImageAvailableListener自动接收图像
-            // 不需要在这里手动获取
-            Thread.sleep(5) // 短暂睡眠以减少CPU使用
+        Log.d(logTag, "正在使用FrameBuffer API捕获屏幕，该API基于系统权限无需用户确认")
+        try {
+            while (isCapturing) {
+                // ImageReader会通过onImageAvailableListener自动接收图像
+                // 不需要在这里手动获取
+                Thread.sleep(5) // 短暂睡眠以减少CPU使用
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "FrameBuffer捕获出错: ${e.message}")
+        } finally {
+            Log.d(logTag, "FrameBuffer捕获已停止")
         }
     }
     
@@ -643,11 +687,17 @@ class MainService : Service() {
         // 在您的定制系统上，有了CAPTURE_VIDEO_OUTPUT权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "Using Video Output API to capture screen")
-        while (isCapturing) {
-            // ImageReader会通过onImageAvailableListener自动接收图像
-            // 不需要在这里手动获取
-            Thread.sleep(5) // 短暂睡眠以减少CPU使用
+        Log.d(logTag, "正在使用Video Output API捕获屏幕，该API基于系统权限无需用户确认")
+        try {
+            while (isCapturing) {
+                // ImageReader会通过onImageAvailableListener自动接收图像
+                // 不需要在这里手动获取
+                Thread.sleep(5) // 短暂睡眠以减少CPU使用
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Video Output捕获出错: ${e.message}")
+        } finally {
+            Log.d(logTag, "Video Output捕获已停止")
         }
     }
 
