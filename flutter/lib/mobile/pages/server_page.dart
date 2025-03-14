@@ -7,6 +7,7 @@ import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../common.dart';
 import '../../common/widgets/dialog.dart';
@@ -214,6 +215,45 @@ class _ServerPageState extends State<ServerPage> {
                         const ConnectionManager(),
                         const PermissionChecker(),
                         SizedBox.fromSize(size: const Size(0, 15.0)),
+                        // 添加检查系统权限按钮
+                        Card(
+                          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(translate("调试工具"), style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          gFFI.serverModel.checkSystemPermissionStatus();
+                                        },
+                                        child: Text(translate("检查系统权限状态")),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          gFFI.serverModel.testScreenCapture();
+                                        },
+                                        child: Text(translate("测试屏幕捕获功能")),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
