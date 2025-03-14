@@ -136,6 +136,16 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 确保MainService启动
+        try {
+            val intent = Intent(this, MainService::class.java)
+            startService(intent)
+            Log.d(logTag, "已启动MainService")
+        } catch (e: Exception) {
+            Log.e(logTag, "启动MainService失败: ${e.message}")
+        }
+        
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -869,12 +879,7 @@ class MainActivity : FlutterActivity() {
     // 测试屏幕捕获功能
     private fun testScreenCapture(): Boolean {
         try {
-            // 检查设备类型
-            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
-                               Build.MODEL.toLowerCase().contains("sunmi") ||
-                               Build.BRAND.toLowerCase().contains("sunmi")
-            
-            Log.d(logTag, "测试屏幕捕获功能 (${if(isSunmiDevice) "商米设备" else "普通设备"})")
+            Log.d(logTag, "测试屏幕捕获功能")
             
             // 启动测试服务
             val intent = Intent(this, MainService::class.java)
