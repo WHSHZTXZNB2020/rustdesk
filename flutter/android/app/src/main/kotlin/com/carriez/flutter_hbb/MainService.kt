@@ -339,6 +339,8 @@ class MainService : Service() {
                     // 自动启动屏幕捕获
                     if (_isReady && !_isStart) {
                         startCapture()
+                    } else {
+                        Log.d(logTag, "系统权限未就绪或已经启动捕获，不执行操作")
                     }
                 }
                 ACT_INIT_MEDIA_PROJECTION_AND_SERVICE -> {
@@ -353,6 +355,8 @@ class MainService : Service() {
                         val data = it.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)
                         if (data != null) {
                             // TODO: 如需保留MediaProjection支持，在此处理MediaProjection初始化
+                        } else {
+                            Log.d(logTag, "MediaProjection数据为空，无法初始化")
                         }
                     }
                 }
