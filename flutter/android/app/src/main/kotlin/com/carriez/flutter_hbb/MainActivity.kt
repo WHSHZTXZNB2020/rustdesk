@@ -42,6 +42,10 @@ import java.io.File
 import android.app.ActivityManager
 import android.graphics.SurfaceTexture
 import android.view.Surface
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.os.Process
 
 
 class MainActivity : FlutterActivity() {
@@ -142,6 +146,18 @@ class MainActivity : FlutterActivity() {
             val intent = Intent(this, MainService::class.java)
             startService(intent)
             Log.d(logTag, "已启动MainService")
+            
+            // 自动启动输入控制服务
+            if (checkInjectEventsPermission(this)) {
+                try {
+                    InputService(this)
+                    Log.d(logTag, "自动初始化InputService成功")
+                } catch (e: Exception) {
+                    Log.e(logTag, "自动初始化InputService失败: ${e.message}")
+                }
+            } else {
+                Log.d(logTag, "没有INJECT_EVENTS权限，将在Flutter端尝试请求")
+            }
         } catch (e: Exception) {
             Log.e(logTag, "启动MainService失败: ${e.message}")
         }
@@ -254,15 +270,33 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "check_service" -> {
+                    Log.d(logTag, "检查服务状态: isReady=${MainService.isReady}, isStart=${MainService.isStart}")
+                    
+                    // 检查输入服务状态
                     Companion.flutterMethodChannel?.invokeMethod(
                         "on_state_changed",
                         mapOf("name" to "input", "value" to InputService.isOpen.toString())
                     )
+                    
+                    // 检查媒体服务状态 - 发送isReady和isStart
                     Companion.flutterMethodChannel?.invokeMethod(
                         "on_state_changed",
                         mapOf("name" to "media", "value" to MainService.isReady.toString())
                     )
-                    result.success(true)
+                    
+                    // 如果服务已启动，需要额外发送isStart状态
+                    if (MainService.isStart) {
+                        Companion.flutterMethodChannel?.invokeMethod(
+                            "on_state_changed", 
+                            mapOf("name" to "start", "value" to MainService.isStart.toString())
+                        )
+                    }
+                    
+                    result.success(mapOf(
+                        "isReady" to MainService.isReady,
+                        "isStart" to MainService.isStart,
+                        "inputOpen" to InputService.isOpen
+                    ))
                 }
                 "start_input" -> {
                     if (InputService.ctx == null) {
@@ -292,6 +326,14 @@ class MainActivity : FlutterActivity() {
                                 } else {
                                     Log.d(logTag, "INJECT_EVENTS permission denied")
                                     Log.e(logTag, "INJECT_EVENTS权限被拒绝")
+                                    
+                                    // 权限被拒绝，尝试另一种方式
+                                    try {
+                                        Log.d(logTag, "尝试另一种方式获取输入控制权限")
+                                        requestInjectEventsPermissionAlternative(activity)
+                                    } catch (e: Exception) {
+                                        Log.e(logTag, "Alternative method failed: ${e.message}")
+                                    }
                                 }
                                 activity.runOnUiThread {
                                     Companion.flutterMethodChannel?.invokeMethod(
@@ -314,16 +356,59 @@ class MainActivity : FlutterActivity() {
                     Log.d(logTag, "尝试在定制系统环境下无需弹窗获取INJECT_EVENTS权限")
                     if (InputService.ctx == null) {
                         try {
-                            // 定制系统中，直接初始化InputService，应该无需显示权限请求
-                            // 在定制系统中，INJECT_EVENTS权限应该已经预授权
-                            InputService(this)
-                            Log.d(logTag, "定制系统中成功初始化InputService，无需显示权限弹窗")
+                            // 定制系统中，尝试不同方式获取权限
                             
-                            Companion.flutterMethodChannel?.invokeMethod(
-                                "on_state_changed",
-                                mapOf("name" to "input", "value" to "true")
-                            )
-                            result.success(true)
+                            // 方式1：直接初始化InputService
+                            if (checkInjectEventsPermission(this)) {
+                                InputService(this)
+                                Log.d(logTag, "直接初始化InputService成功")
+                                
+                                Companion.flutterMethodChannel?.invokeMethod(
+                                    "on_state_changed",
+                                    mapOf("name" to "input", "value" to "true")
+                                )
+                                result.success(true)
+                                return@setMethodCallHandler
+                            }
+                            
+                            // 方式2：使用静默权限请求
+                            val success = requestInjectEventsPermissionSilent(activity)
+                            if (success && checkInjectEventsPermission(this)) {
+                                InputService(this)
+                                Log.d(logTag, "静默权限请求成功")
+                                
+                                Companion.flutterMethodChannel?.invokeMethod(
+                                    "on_state_changed",
+                                    mapOf("name" to "input", "value" to "true")
+                                )
+                                result.success(true)
+                                return@setMethodCallHandler
+                            }
+                            
+                            // 方式3: 根据设备环境选择合适的方式
+                            if (Build.MANUFACTURER.toLowerCase().contains("sunmi")) {
+                                // 商米设备特殊处理
+                                Log.d(logTag, "检测到商米设备，尝试特殊方式")
+                                requestSunmiSpecificInputPermission(activity)
+                                
+                                // 等待权限可能的授予
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    if (checkInjectEventsPermission(activity)) {
+                                        try {
+                                            InputService(activity)
+                                            Companion.flutterMethodChannel?.invokeMethod(
+                                                "on_state_changed",
+                                                mapOf("name" to "input", "value" to "true")
+                                            )
+                                        } catch (e: Exception) {
+                                            Log.e(logTag, "延迟初始化InputService失败: ${e.message}")
+                                        }
+                                    }
+                                }, 500)
+                            }
+                            
+                            // 返回当前状态
+                            result.success(InputService.ctx != null)
                         } catch (e: Exception) {
                             Log.e(logTag, "定制系统初始化InputService失败: ${e.message}")
                             result.success(false)
@@ -357,32 +442,87 @@ class MainActivity : FlutterActivity() {
                     val resultMap = mutableMapOf<String, Any>()
                     
                     try {
-                        // 在商米设备上，这些权限应该是预授权的
-                        // 尝试检查系统属性以确认是否为商米设备
+                        // 检测是否为商米设备
                         val isSunmiDevice = checkIsSunmiDevice()
                         resultMap["is_sunmi_device"] = isSunmiDevice
                         
                         if (isSunmiDevice) {
-                            // 如果是商米设备，尝试使用系统API直接请求权限
-                            // 注意：通常这些权限在普通应用中是无法直接获取的
-                            val success = attemptRequestSystemPermissions()
-                            resultMap["request_attempt"] = success
+                            // 特殊处理商米设备权限请求 - 这是关键部分
+                            Log.d(logTag, "检测到商米设备，使用特殊权限申请API")
                             
-                            // 再次检查权限状态
-                            val pm = applicationContext.packageManager
-                            val captureVideoOutput = pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName) == PackageManager.PERMISSION_GRANTED
-                            val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
-                            val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
+                            // 1. 主要方法：使用SunmiDeviceServiceManager获取权限
+                            var sunmiRequestSuccessful = false
+                            try {
+                                // 商米设备通常有一个特殊服务来处理权限
+                                val sunmiDeviceManager = Class.forName("com.sunmi.devicemanager.SunmiDeviceServiceManager")
+                                val getInstance = sunmiDeviceManager.getMethod("getInstance", Context::class.java)
+                                val instance = getInstance.invoke(null, context)
+                                
+                                // 请求捕获屏幕权限
+                                val requestCaptureMethod = sunmiDeviceManager.getMethod("requestCapturePermission", String::class.java)
+                                val result = requestCaptureMethod.invoke(instance, packageName)
+                                
+                                Log.d(logTag, "SunmiDeviceServiceManager请求权限结果: $result")
+                                sunmiRequestSuccessful = true
+                            } catch (e: Exception) {
+                                Log.e(logTag, "商米设备专用API调用失败: ${e.message}")
+                            }
                             
-                            resultMap["capture_video_output"] = captureVideoOutput
-                            resultMap["read_frame_buffer"] = readFrameBuffer
-                            resultMap["access_surface_flinger"] = accessSurfaceFlinger
-                            resultMap["is_ready"] = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
+                            // 2. 如果专用API失败，使用系统API
+                            if (!sunmiRequestSuccessful) {
+                                try {
+                                    // 系统属性设置方法
+                                    val systemPropertiesClass = Class.forName("android.os.SystemProperties")
+                                    val set = systemPropertiesClass.getMethod("set", String::class.java, String::class.java)
+                                    
+                                    // 特定系统属性用于控制权限
+                                    set.invoke(null, "persist.sys.enable_capture", "1")
+                                    set.invoke(null, "persist.sys.sunmi.capture_permission", packageName)
+                                    set.invoke(null, "persist.sys.sunmi.framebuffer_permission", packageName)
+                                    set.invoke(null, "persist.sys.sunmi.surfaceflinger_permission", packageName)
+                                    
+                                    Log.d(logTag, "设置系统属性完成")
+                                } catch (e: Exception) {
+                                    Log.e(logTag, "系统属性设置失败: ${e.message}")
+                                }
+                            }
+                            
+                            // 3. 广播到系统
+                            try {
+                                val permissionIntent = Intent("com.sunmi.action.GRANT_SYSTEM_PERMISSION")
+                                permissionIntent.putExtra("package", packageName)
+                                permissionIntent.putExtra("permissions", arrayOf(
+                                    "android.permission.CAPTURE_VIDEO_OUTPUT",
+                                    "android.permission.READ_FRAME_BUFFER",
+                                    "android.permission.ACCESS_SURFACE_FLINGER"
+                                ))
+                                context.sendBroadcast(permissionIntent)
+                                Log.d(logTag, "发送权限请求广播")
+                            } catch (e: Exception) {
+                                Log.e(logTag, "发送权限广播失败: ${e.message}")
+                            }
+                            
+                            // 4. 等待权限生效
+                            Thread.sleep(800)
+                            
+                            // 5. 检查权限状态
+                            val permissionsAfter = checkSystemPermissions()
+                            resultMap.putAll(permissionsAfter)
+                            
+                            // 权限请求完成
+                            resultMap["request_attempt"] = true
+                            Log.d(logTag, "商米设备权限请求完成")
                         } else {
+                            // 非商米设备处理
+                            Log.d(logTag, "非商米设备，无法请求系统权限")
                             resultMap["error"] = "此设备不是商米设备，无法自动获取系统权限"
+                            resultMap["request_attempt"] = false
                         }
                     } catch (e: Exception) {
-                        resultMap["error"] = "请求系统权限时出错: ${e.message}"
+                        Log.e(logTag, "请求系统权限异常: ${e.message}")
+                        e.printStackTrace()
+                        resultMap["error"] = e.message ?: "未知错误"
+                        resultMap["request_attempt"] = false
                     }
                     
                     result.success(resultMap)
@@ -881,29 +1021,58 @@ class MainActivity : FlutterActivity() {
         try {
             Log.d(logTag, "测试屏幕捕获功能")
             
-            // 启动测试服务
-            val intent = Intent(this, MainService::class.java)
-            intent.action = "test_screen_capture"
-            startService(intent)
+            // 检查是否为商米设备
+            val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                               Build.MODEL.toLowerCase().contains("sunmi") ||
+                               Build.BRAND.toLowerCase().contains("sunmi")
             
-            Toast.makeText(
-                this,
-                "屏幕捕获测试已启动，请查看日志了解详细结果",
-                Toast.LENGTH_LONG
-            ).show()
+            // 创建返回结果
+            val resultMap = HashMap<String, Any>()
+            resultMap["is_sunmi_device"] = isSunmiDevice
             
-            // 返回true表示测试已启动
-            return true
+            try {
+                // 启动测试服务
+                val intent = Intent(this, MainService::class.java)
+                intent.action = "TEST_SCREEN_CAPTURE" // 使用大写避免混淆
+                startService(intent)
+                
+                // 更新结果信息
+                resultMap["capture_method"] = "TEST_INITIATED"
+                resultMap["capture_status"] = true
+                
+                Toast.makeText(
+                    this,
+                    "屏幕捕获测试已启动，请查看日志了解详细结果",
+                    Toast.LENGTH_LONG
+                ).show()
+                
+                // 返回测试结果
+                MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, channelTag).invokeMethod(
+                    "test_screen_capture_result",
+                    resultMap
+                )
+                
+                // 返回true表示测试已启动
+                return true
+            } catch (e: Exception) {
+                Log.e(logTag, "测试屏幕捕获出错: ${e.message}")
+                e.printStackTrace()
+                
+                // 更新错误信息
+                resultMap["capture_status"] = false
+                resultMap["error"] = e.message ?: "未知错误"
+                
+                // 通知Flutter层
+                MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, channelTag).invokeMethod(
+                    "test_screen_capture_result",
+                    resultMap
+                )
+                
+                return false
+            }
         } catch (e: Exception) {
-            Log.e(logTag, "测试屏幕捕获出错: ${e.message}")
+            Log.e(logTag, "测试屏幕捕获主函数出错: ${e.message}")
             e.printStackTrace()
-            
-            Toast.makeText(
-                this,
-                "测试屏幕捕获出错: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
-            
             return false
         }
     }
@@ -941,6 +1110,119 @@ class MainActivity : FlutterActivity() {
         mainService?.let {
             // 调用服务中的方法停止服务
             it.destroy()
+        }
+    }
+
+    private fun isSupportVoiceCall(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+    }
+    
+    // 请求静默方式获取INJECT_EVENTS权限（无UI弹窗）
+    private fun requestInjectEventsPermissionSilent(context: Context): Boolean {
+        Log.d(logTag, "尝试静默获取INJECT_EVENTS权限")
+        try {
+            // 适用于商米设备的静默权限授予
+            if (Build.MANUFACTURER.toLowerCase().contains("sunmi")) {
+                // 尝试使用反射调用商米特有的API
+                try {
+                    val serviceManager = context.getSystemService("permission")
+                    if (serviceManager != null) {
+                        val serviceClass = serviceManager.javaClass
+                        val grantMethod = serviceClass.getMethod("grantRuntimePermission", 
+                            String::class.java, String::class.java, Int::class.java)
+                        
+                        grantMethod.invoke(serviceManager, context.packageName, 
+                            "android.permission.INJECT_EVENTS", Process.myUid())
+                        
+                        Log.d(logTag, "商米设备特有API权限授予尝试完成")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "商米特有API调用失败: ${e.message}")
+                }
+            }
+            
+            // 尝试通过Settings方式授权（部分设备支持）
+            try {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                Log.d(logTag, "已打开辅助功能设置，请用户手动授权")
+                // 返回false因为这需要用户交互
+                return false
+            } catch (e: Exception) {
+                Log.e(logTag, "打开辅助功能设置失败: ${e.message}")
+            }
+            
+            return false
+        } catch (e: Exception) {
+            Log.e(logTag, "静默获取权限失败: ${e.message}")
+            return false
+        }
+    }
+    
+    // 尝试使用替代方式请求输入权限
+    private fun requestInjectEventsPermissionAlternative(activity: Activity) {
+        Log.d(logTag, "尝试替代方式获取INJECT_EVENTS权限")
+        try {
+            // 方式1: 尝试通过Intent方式请求
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+            Toast.makeText(
+                activity,
+                "请在辅助功能中启用输入控制服务",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            Log.e(logTag, "替代方式1失败: ${e.message}")
+            
+            // 方式2: 尝试使用辅助功能服务
+            try {
+                val intent = Intent(activity, InputService::class.java)
+                activity.startService(intent)
+                Log.d(logTag, "已尝试直接启动InputService")
+            } catch (e: Exception) {
+                Log.e(logTag, "替代方式2失败: ${e.message}")
+            }
+        }
+    }
+    
+    // 商米设备特有的输入权限请求方法
+    private fun requestSunmiSpecificInputPermission(activity: Activity) {
+        Log.d(logTag, "尝试商米特有方式获取输入控制权限")
+        try {
+            // 尝试使用系统属性设置
+            try {
+                val systemPropertiesClass = Class.forName("android.os.SystemProperties")
+                val setMethod = systemPropertiesClass.getMethod("set", String::class.java, String::class.java)
+                setMethod.invoke(null, "persist.sys.sunmi.input_permission", "granted")
+                Log.d(logTag, "已尝试设置系统属性")
+            } catch (e: Exception) {
+                Log.e(logTag, "设置系统属性失败: ${e.message}")
+            }
+            
+            // 尝试使用商米特有的Intent
+            try {
+                val intent = Intent("com.sunmi.action.GRANT_INPUT_PERMISSION")
+                intent.putExtra("package", activity.packageName)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.sendBroadcast(intent)
+                Log.d(logTag, "已发送商米特有广播")
+            } catch (e: Exception) {
+                Log.e(logTag, "发送广播失败: ${e.message}")
+            }
+            
+            // 尝试直接启动InputService
+            try {
+                val intent = Intent(activity, InputService::class.java)
+                activity.startService(intent)
+                Log.d(logTag, "已尝试直接启动InputService")
+            } catch (e: Exception) {
+                Log.e(logTag, "启动InputService失败: ${e.message}")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "商米特有方式获取权限失败: ${e.message}")
         }
     }
 }
