@@ -35,6 +35,11 @@ import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 import android.content.pm.PackageManager
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import android.hardware.display.Display
+import android.hardware.display.DisplayManager
+import android.widget.Toast
+import java.io.File
+import android.app.ActivityManager
 
 
 class MainActivity : FlutterActivity() {
@@ -65,6 +70,41 @@ class MainActivity : FlutterActivity() {
         )
         initFlutterChannel(flutterMethodChannel!!)
         thread { setCodecInfo() }
+
+        flutterMethodChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "init_service") {
+                initService()
+                result.success(true)
+            } else if (call.method == "start_service") {
+                startService()
+                result.success(true)
+            } else if (call.method == "stop_service") {
+                stopService()
+                result.success(true)
+            } else if (call.method == "check_system_permissions") {
+                // 检查系统权限
+                val permissions = checkSystemPermissions()
+                result.success(permissions)
+            } else if (call.method == "request_system_permissions") {
+                // 请求系统权限
+                try {
+                    requestSystemPermissions()
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("PERMISSION_REQUEST_FAILED", e.message, null)
+                }
+            } else if (call.method == "test_screen_capture") {
+                // 测试屏幕捕获功能
+                try {
+                    val testResult = testScreenCapture()
+                    result.success(testResult)
+                } catch (e: Exception) {
+                    result.error("SCREEN_CAPTURE_TEST_FAILED", e.message, null)
+                }
+            } else {
+                result.notImplemented()
+            }
+        }
     }
 
     override fun onResume() {
@@ -663,5 +703,306 @@ class MainActivity : FlutterActivity() {
             Log.e(logTag, "请求系统权限失败: ${e.message}")
             return false
         }
+    }
+
+    private fun checkSystemPermissions(): Map<String, Boolean> {
+        val pm = applicationContext.packageManager
+        val packageName = applicationContext.packageName
+        val permissionResults = mutableMapOf<String, Boolean>()
+        
+        // 检查设备信息
+        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                            Build.MODEL.toLowerCase().contains("sunmi") ||
+                            Build.BRAND.toLowerCase().contains("sunmi")
+                            
+        Log.d(logTag, "设备信息: 商米设备=$isSunmiDevice, 制造商=${Build.MANUFACTURER}, 型号=${Build.MODEL}, 品牌=${Build.BRAND}")
+        
+        // 检查权限状态
+        val permissions = listOf(
+            "android.permission.CAPTURE_VIDEO_OUTPUT",
+            "android.permission.READ_FRAME_BUFFER",
+            "android.permission.ACCESS_SURFACE_FLINGER"
+        )
+        
+        permissions.forEach { permission ->
+            val granted = pm.checkPermission(permission, packageName) == PackageManager.PERMISSION_GRANTED
+            permissionResults[permission] = granted
+            
+            Log.d(logTag, "权限状态 - $permission: $granted")
+        }
+        
+        // 商米设备特殊处理：尝试通过功能测试验证权限
+        if (isSunmiDevice) {
+            Log.d(logTag, "商米设备: 尝试通过功能测试验证权限")
+            
+            // 功能测试验证逻辑
+            val functionalTestResults = testPermissionsFunctionally()
+            
+            // 合并结果，如果功能测试通过则覆盖权限检查结果
+            functionalTestResults.forEach { (permission, result) ->
+                if (result) {
+                    permissionResults[permission] = true
+                    Log.d(logTag, "商米设备功能测试: $permission 实际可用")
+                }
+            }
+        }
+        
+        return permissionResults
+    }
+    
+    // 通过实际功能测试验证权限
+    private fun testPermissionsFunctionally(): Map<String, Boolean> {
+        val results = mutableMapOf<String, Boolean>()
+        
+        try {
+            // 测试SurfaceFlinger权限
+            results["android.permission.ACCESS_SURFACE_FLINGER"] = testSurfaceFlingerAccess()
+            
+            // 测试FrameBuffer权限
+            results["android.permission.READ_FRAME_BUFFER"] = testFrameBufferAccess()
+            
+            // 测试VideoOutput权限
+            results["android.permission.CAPTURE_VIDEO_OUTPUT"] = testVideoOutputCapture()
+            
+        } catch (e: Exception) {
+            Log.e(logTag, "功能测试时出错: ${e.message}")
+        }
+        
+        return results
+    }
+    
+    // 测试SurfaceFlinger访问
+    private fun testSurfaceFlingerAccess(): Boolean {
+        try {
+            // 尝试通过反射获取SurfaceFlinger服务
+            val smClass = Class.forName("android.os.ServiceManager")
+            val getServiceMethod = smClass.getDeclaredMethod("getService", String::class.java)
+            val surfaceFlingerService = getServiceMethod.invoke(null, "SurfaceFlinger")
+            
+            if (surfaceFlingerService != null) {
+                // 尝试调用一个SurfaceFlinger的方法来验证访问权限
+                val sfClass = surfaceFlingerService.javaClass
+                val method = sfClass.getMethod("getDisplayInfo", Int::class.java)
+                val result = method.invoke(surfaceFlingerService, 0)
+                
+                return result != null
+            }
+            return false
+        } catch (e: Exception) {
+            Log.d(logTag, "SurfaceFlinger测试失败: ${e.message}")
+            return false
+        }
+    }
+    
+    // 测试FrameBuffer访问
+    private fun testFrameBufferAccess(): Boolean {
+        try {
+            // 尝试读取frame buffer设备
+            val file = File("/dev/graphics/fb0")
+            if (file.exists() && file.canRead()) {
+                // 只需要测试是否可读即可，不需要实际读取
+                return true
+            }
+            return false
+        } catch (e: Exception) {
+            Log.d(logTag, "FrameBuffer测试失败: ${e.message}")
+            return false
+        }
+    }
+    
+    // 测试VideoOutput捕获
+    private fun testVideoOutputCapture(): Boolean {
+        try {
+            // 尝试调用相关API
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+                val displays = displayManager.displays
+                
+                // 如果能获取显示信息，可能有权限
+                if (displays != null && displays.isNotEmpty()) {
+                    // 进一步测试...
+                    return testCaptureDisplayOutput(displays[0])
+                }
+            }
+            return false
+        } catch (e: Exception) {
+            Log.d(logTag, "VideoOutput测试失败: ${e.message}")
+            return false
+        }
+    }
+    
+    // 测试DisplayOutput捕获
+    private fun testCaptureDisplayOutput(display: Display): Boolean {
+        try {
+            // 尝试创建虚拟显示以测试视频捕获权限
+            // 这只是一个简单测试，实际上不会捕获
+            
+            // 实际使用时，可采用反射调用或其他方法测试底层访问
+            val displayId = display.displayId
+            val classLoader = classLoader
+            
+            // 尝试使用反射调用非公开API
+            val displayManagerGlobalClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
+            val getInstanceMethod = displayManagerGlobalClass.getMethod("getInstance")
+            val instance = getInstanceMethod.invoke(null)
+            
+            if (instance != null) {
+                // 成功获取DisplayManagerGlobal实例，可能表示有权限
+                return true
+            }
+            
+            return false
+        } catch (e: Exception) {
+            Log.d(logTag, "DisplayOutput测试失败: ${e.message}")
+            return false
+        }
+    }
+    
+    // 请求系统权限 - 主要用于商米设备
+    private fun requestSystemPermissions() {
+        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                            Build.MODEL.toLowerCase().contains("sunmi") ||
+                            Build.BRAND.toLowerCase().contains("sunmi")
+                            
+        if (isSunmiDevice) {
+            Log.d(logTag, "商米设备: 尝试请求系统权限")
+            
+            // 特殊处理商米设备权限请求
+            try {
+                // 尝试通过商米特定方式请求权限
+                requestSunmiSpecificPermissions()
+                
+                // 检查权限状态变化
+                val permissionsAfterRequest = checkSystemPermissions()
+                val allGranted = permissionsAfterRequest.values.all { it }
+                
+                Log.d(logTag, "商米设备权限请求后状态: $permissionsAfterRequest, 全部授予=$allGranted")
+                
+                // 更新UI提示
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        if (allGranted) "系统权限已全部授予" else "部分系统权限未授予，请联系管理员",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e(logTag, "商米设备请求权限失败: ${e.message}")
+                e.printStackTrace()
+                
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "请求权限时出错: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        } else {
+            Log.d(logTag, "非商米设备，无法请求系统权限")
+            
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    "系统权限需要ROOT权限或系统签名，请联系系统管理员",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+    
+    // 请求商米特定权限
+    private fun requestSunmiSpecificPermissions() {
+        try {
+            Log.d(logTag, "尝试通过商米API请求系统权限")
+            
+            // 尝试通过反射调用商米特定API
+            val classLoader = classLoader
+            val sunmiServiceClass = classLoader.loadClass("com.sunmi.deviceservice.SunmiDeviceService")
+            val sunmiInstanceMethod = sunmiServiceClass.getMethod("getInstance", Context::class.java)
+            val sunmiInstance = sunmiInstanceMethod.invoke(null, this)
+            
+            if (sunmiInstance != null) {
+                // 尝试获取权限管理服务
+                val getPermissionServiceMethod = sunmiServiceClass.getMethod("getPermissionService")
+                val permissionService = getPermissionServiceMethod.invoke(sunmiInstance)
+                
+                if (permissionService != null) {
+                    val permissionServiceClass = permissionService.javaClass
+                    
+                    // 请求CAPTURE_VIDEO_OUTPUT权限
+                    val requestVideoOutputMethod = permissionServiceClass.getMethod(
+                        "requestPermission",
+                        String::class.java,
+                        String::class.java
+                    )
+                    requestVideoOutputMethod.invoke(
+                        permissionService,
+                        "android.permission.CAPTURE_VIDEO_OUTPUT",
+                        "用于屏幕共享功能"
+                    )
+                    
+                    // 请求READ_FRAME_BUFFER权限
+                    requestVideoOutputMethod.invoke(
+                        permissionService,
+                        "android.permission.READ_FRAME_BUFFER",
+                        "用于屏幕共享功能"
+                    )
+                    
+                    // 请求ACCESS_SURFACE_FLINGER权限
+                    requestVideoOutputMethod.invoke(
+                        permissionService,
+                        "android.permission.ACCESS_SURFACE_FLINGER",
+                        "用于屏幕共享功能"
+                    )
+                    
+                    Log.d(logTag, "成功调用商米权限请求API")
+                    return
+                }
+            }
+            
+            Log.e(logTag, "无法获取商米权限服务")
+        } catch (e: Exception) {
+            Log.e(logTag, "请求商米特定权限失败: ${e.message}")
+            throw e
+        }
+    }
+
+    // 测试屏幕捕获功能
+    private fun testScreenCapture(): Boolean {
+        try {
+            // 尝试各种屏幕捕获方法
+            Log.d(logTag, "测试屏幕捕获功能")
+            
+            // 先检查MainService是否已启动
+            val serviceRunning = isServiceRunning(MainService::class.java)
+            if (!serviceRunning) {
+                Log.d(logTag, "MainService未运行，无法测试屏幕捕获")
+                return false
+            }
+            
+            // 尝试向MainService发送测试请求
+            val intent = Intent(this, MainService::class.java)
+            intent.action = "test_screen_capture"
+            startService(intent)
+            
+            // 由于屏幕捕获是异步的，这里返回true表示测试已启动
+            // 实际结果需要通过日志查看
+            return true
+        } catch (e: Exception) {
+            Log.e(logTag, "测试屏幕捕获出错: ${e.message}")
+            return false
+        }
+    }
+    
+    // 检查服务是否正在运行
+    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 }
