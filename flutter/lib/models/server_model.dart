@@ -978,6 +978,65 @@ class ServerModel with ChangeNotifier {
       showToast('请求系统权限失败: $e', timeout: Duration(seconds: 5));
     }
   }
+
+  // 检查系统权限状态
+  Future<Map<String, bool>> checkSystemPermissions() async {
+    try {
+      debugPrint('检查系统权限状态');
+      final result = await platformFFI.invokeMethod('check_system_permissions');
+      
+      if (result is Map) {
+        // 将结果转换为Map<String, bool>
+        final Map<String, bool> permissionStatus = {};
+        result.forEach((key, value) {
+          if (key is String && value is bool) {
+            permissionStatus[key] = value;
+          }
+        });
+        
+        debugPrint('系统权限状态: $permissionStatus');
+        return permissionStatus;
+      }
+      
+      debugPrint('无法获取系统权限状态，结果格式错误: $result');
+      return {};
+    } catch (e) {
+      debugPrint('检查系统权限出错: $e');
+      return {};
+    }
+  }
+  
+  // 请求系统权限 - 主要用于商米设备
+  Future<bool> requestSystemPermissions() async {
+    try {
+      debugPrint('请求系统权限');
+      final result = await platformFFI.invokeMethod('request_system_permissions');
+      
+      // 请求后检查权限状态变化
+      final permissionsAfter = await checkSystemPermissions();
+      final allGranted = permissionsAfter.values.every((granted) => granted);
+      
+      debugPrint('请求系统权限结果: $result, 全部授予=$allGranted');
+      return allGranted;
+    } catch (e) {
+      debugPrint('请求系统权限出错: $e');
+      return false;
+    }
+  }
+  
+  // 测试屏幕捕获功能
+  Future<bool> testScreenCapture() async {
+    try {
+      debugPrint('测试屏幕捕获功能');
+      final result = await platformFFI.invokeMethod('test_screen_capture');
+      
+      debugPrint('屏幕捕获测试结果: $result');
+      return result is bool ? result : false;
+    } catch (e) {
+      debugPrint('测试屏幕捕获出错: $e');
+      return false;
+    }
+  }
 }
 
 enum ClientType {
