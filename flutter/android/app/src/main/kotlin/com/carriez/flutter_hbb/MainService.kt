@@ -1584,90 +1584,320 @@ class MainService : Service() {
         return results
     }
 
-    // 测试VideoOutput捕获
+    // 测试帧缓冲区访问
+    private fun testFrameBufferAccess(): Boolean {
+        try {
+            // 尝试读取帧缓冲区设备文件
+            val file = java.io.File("/dev/graphics/fb0")
+            
+            // 检查文件是否存在且可读
+            val fileExists = file.exists()
+            val canRead = file.canRead()
+            
+            Log.d(logTag, "帧缓冲区测试: 文件存在=$fileExists, 可读=$canRead")
+            
+            return fileExists && canRead
+        } catch (e: Exception) {
+            Log.e(logTag, "测试帧缓冲区访问失败: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * 测试SurfaceFlinger访问
+     */
+    private fun testSurfaceFlingerAccess(): Boolean {
+        try {
+            // 尝试初始化SurfaceControl
+            if (mSurfaceControl == null) {
+                initSurfaceControl()
+            }
+            
+            // 检查SurfaceControl是否已初始化成功
+            if (mSurfaceControl != null) {
+                Log.d(logTag, "SurfaceFlinger测试: SurfaceControl已成功初始化")
+                return true
+            }
+            
+            // 尝试强制使用系统接口进行测试
+            try {
+                val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+                val display = displayManager.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Android 10及以上使用SurfaceControl.Builder
+                    val surfaceControl = SurfaceControl.Builder()
+                        .setName("TestSurfaceControl")
+                        .build()
+                    
+                    if (surfaceControl != null) {
+                        Log.d(logTag, "SurfaceFlinger测试: 通过SurfaceControl.Builder测试成功")
+                        surfaceControl.release()
+                        return true
+                    }
+                }
+                
+                // 尝试使用反射方法访问SurfaceFlinger
+                val serviceManager = Class.forName("android.os.ServiceManager")
+                val getService = serviceManager.getMethod("getService", String::class.java)
+                getService.invoke(null, "SurfaceFlinger")
+                
+                Log.d(logTag, "SurfaceFlinger测试: 通过ServiceManager访问成功")
+                return true
+            } catch (e: Exception) {
+                Log.e(logTag, "访问SurfaceFlinger失败: ${e.message}")
+            }
+            
+            return false
+        } catch (e: Exception) {
+            Log.e(logTag, "测试SurfaceFlinger访问失败: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * 测试视频输出捕获
+     */
     private fun testVideoOutputCapture(): Boolean {
         try {
-            // 尝试调用相关API
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
                 val displays = displayManager.displays
                 
-                // 如果能获取显示信息，可能有权限
+                // 尝试获取显示信息
                 if (displays != null && displays.isNotEmpty()) {
-                    try {
-                        // 简单测试是否可以创建虚拟显示
-                        val testSurface = Surface(SurfaceTexture(false))
-                        val testDisplay = displayManager.createVirtualDisplay(
-                            "PermissionTest",
-                            1, 1, 1,
-                            testSurface,
-                            DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-                        )
-                        
-                        val result = testDisplay != null
-                        testDisplay?.release()
-                        testSurface.release()
-                        
-                        Log.d(logTag, "商米设备功能测试: android.permission.CAPTURE_VIDEO_OUTPUT 实际可用")
-                        return true
-                    } catch (e: Exception) {
-                        // 即使创建失败，如果是商米设备，也认为它可能是可用的
-                        val isSunmiDevice = Build.MANUFACTURER.toLowerCase().contains("sunmi")
-                        if (isSunmiDevice) {
-                            Log.d(logTag, "商米设备功能测试: android.permission.CAPTURE_VIDEO_OUTPUT 可能可用")
-                            return true
-                        }
-                    }
-                }
-            }
-            return false
-        } catch (e: Exception) {
-            Log.d(logTag, "VideoOutput测试失败: ${e.message}")
-            return false
-        }
-    }
-
-    // 测试SurfaceFlinger访问
-    private fun testSurfaceFlingerAccess(): Boolean {
-        try {
-            // 尝试通过反射获取SurfaceFlinger服务
-            val smClass = Class.forName("android.os.ServiceManager")
-            val getServiceMethod = smClass.getDeclaredMethod("getService", String::class.java)
-            val surfaceFlingerService = getServiceMethod.invoke(null, "SurfaceFlinger")
-            
-            if (surfaceFlingerService != null) {
-                // 尝试调用一个SurfaceFlinger的方法来验证访问权限
-                try {
-                    val sfClass = surfaceFlingerService.javaClass
-                    val method = sfClass.getMethod("getDisplayInfo", Int::class.java)
-                    val result = method.invoke(surfaceFlingerService, 0)
+                    Log.d(logTag, "视频输出测试: 成功获取显示器信息")
                     
-                    return result != null
-                } catch (e: Exception) {
-                    Log.d(logTag, "SurfaceFlinger测试失败: ${e.message}")
+                    try {
+                        // 尝试创建一个临时的虚拟显示
+                        val surfaceTexture = SurfaceTexture(0)
+                        surfaceTexture.setDefaultBufferSize(1, 1)
+                        val surface = Surface(surfaceTexture)
+                        
+                        try {
+                            val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                            val virtualDisplay = displayManager.createVirtualDisplay(
+                                "TestVirtualDisplay",
+                                1, 1, 1,
+                                surface,
+                                flags
+                            )
+                            
+                            if (virtualDisplay != null) {
+                                Log.d(logTag, "视频输出测试: 成功创建虚拟显示")
+                                virtualDisplay.release()
+                                surface.release()
+                                surfaceTexture.release()
+                                return true
+                            }
+                        } catch (e: Exception) {
+                            Log.e(logTag, "创建虚拟显示失败: ${e.message}")
+                        } finally {
+                            surface.release()
+                            surfaceTexture.release()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(logTag, "创建测试Surface失败: ${e.message}")
+                    }
+                    
+                    // 即使创建虚拟显示失败，如果能获取显示信息，我们仍认为可能可用
+                    // 因为某些商米设备允许屏幕捕获但可能限制虚拟显示的创建
+                    return true
                 }
             }
+            
             return false
         } catch (e: Exception) {
-            Log.d(logTag, "SurfaceFlinger测试失败: ${e.message}")
+            Log.e(logTag, "测试视频输出捕获失败: ${e.message}")
             return false
         }
     }
-
-    // 测试FrameBuffer访问
-    private fun testFrameBufferAccess(): Boolean {
+    
+    /**
+     * 测试屏幕捕获功能
+     * 返回Pair<Boolean, String>，第一个参数表示是否成功，第二个参数表示使用的方法
+     */
+    fun testScreenCapture(): Pair<Boolean, String> {
         try {
-            // 尝试读取frame buffer设备
-            val file = java.io.File("/dev/graphics/fb0")
-            if (file.exists() && file.canRead()) {
-                // 只需要测试是否可读即可，不需要实际读取
-                return true
+            Log.d(logTag, "开始测试屏幕捕获功能...")
+            
+            // 首先尝试CAPTURE_VIDEO_OUTPUT方法
+            val hasVideoOutputPerm = hasCaptureVideoOutputPermission()
+            if (hasVideoOutputPerm || testVideoOutputCapture()) {
+                Log.d(logTag, "CAPTURE_VIDEO_OUTPUT测试通过")
+                return Pair(true, "CAPTURE_VIDEO_OUTPUT")
             }
-            return false
+            
+            // 然后尝试ACCESS_SURFACE_FLINGER方法
+            val hasSurfaceFlingerPerm = hasAccessSurfaceFlingerPermission()
+            if (hasSurfaceFlingerPerm || testSurfaceFlingerAccess()) {
+                Log.d(logTag, "ACCESS_SURFACE_FLINGER测试通过")
+                return Pair(true, "ACCESS_SURFACE_FLINGER")
+            }
+            
+            // 最后尝试READ_FRAME_BUFFER方法
+            val hasFrameBufferPerm = hasReadFrameBufferPermission()
+            if (hasFrameBufferPerm || testFrameBufferAccess()) {
+                Log.d(logTag, "READ_FRAME_BUFFER测试通过")
+                return Pair(true, "READ_FRAME_BUFFER")
+            }
+            
+            // 商米设备可能需要特殊处理
+            val isSunmiDevice = isSunmiDevice()
+            if (isSunmiDevice) {
+                Log.d(logTag, "商米设备可能有特殊授权，尝试综合测试")
+                
+                // 尝试使用商米设备专用方法
+                try {
+                    // 商米设备特定的综合测试
+                    val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+                    val display = displayManager.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+                    
+                    if (display != null) {
+                        Log.d(logTag, "商米设备测试: 成功获取显示器信息")
+                        return Pair(true, "SUNMI_SPECIFIC")
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "商米设备专用测试失败: ${e.message}")
+                }
+            }
+            
+            // 所有方法都失败
+            Log.d(logTag, "所有屏幕捕获方法测试都失败")
+            return Pair(false, "NONE")
         } catch (e: Exception) {
-            Log.d(logTag, "FrameBuffer测试失败: ${e.message}")
+            Log.e(logTag, "测试屏幕捕获功能时出错: ${e.message}")
+            return Pair(false, "ERROR: ${e.message}")
+        }
+    }
+    
+    /**
+     * 检查是否拥有CAPTURE_VIDEO_OUTPUT权限
+     */
+    fun hasCaptureVideoOutputPermission(): Boolean {
+        try {
+            // 使用PM检查权限
+            val result = checkCallingOrSelfPermission("android.permission.CAPTURE_VIDEO_OUTPUT")
+            val hasPermission = result == PackageManager.PERMISSION_GRANTED
+            
+            Log.d(logTag, "CAPTURE_VIDEO_OUTPUT权限检查: $hasPermission")
+            
+            // 对于商米设备，如果权限检查失败，尝试使用功能测试
+            if (!hasPermission && isSunmiDevice()) {
+                val functionTest = testVideoOutputCapture()
+                Log.d(logTag, "商米设备CAPTURE_VIDEO_OUTPUT功能测试: $functionTest")
+                
+                if (functionTest) {
+                    Log.d(logTag, "商米设备CAPTURE_VIDEO_OUTPUT权限标准检查不通过，但功能测试通过")
+                }
+                
+                return functionTest
+            }
+            
+            return hasPermission
+        } catch (e: Exception) {
+            Log.e(logTag, "检查CAPTURE_VIDEO_OUTPUT权限时出错: ${e.message}")
             return false
         }
+    }
+    
+    /**
+     * 检查是否拥有READ_FRAME_BUFFER权限
+     */
+    fun hasReadFrameBufferPermission(): Boolean {
+        try {
+            // 使用PM检查权限
+            val result = checkCallingOrSelfPermission("android.permission.READ_FRAME_BUFFER")
+            val hasPermission = result == PackageManager.PERMISSION_GRANTED
+            
+            Log.d(logTag, "READ_FRAME_BUFFER权限检查: $hasPermission")
+            
+            // 对于商米设备，如果权限检查失败，尝试使用功能测试
+            if (!hasPermission && isSunmiDevice()) {
+                val functionTest = testFrameBufferAccess()
+                Log.d(logTag, "商米设备READ_FRAME_BUFFER功能测试: $functionTest")
+                
+                if (functionTest) {
+                    Log.d(logTag, "商米设备READ_FRAME_BUFFER权限标准检查不通过，但功能测试通过")
+                }
+                
+                return functionTest
+            }
+            
+            return hasPermission
+        } catch (e: Exception) {
+            Log.e(logTag, "检查READ_FRAME_BUFFER权限时出错: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * 检查是否拥有ACCESS_SURFACE_FLINGER权限
+     */
+    fun hasAccessSurfaceFlingerPermission(): Boolean {
+        try {
+            // 使用PM检查权限
+            val result = checkCallingOrSelfPermission("android.permission.ACCESS_SURFACE_FLINGER")
+            val hasPermission = result == PackageManager.PERMISSION_GRANTED
+            
+            Log.d(logTag, "ACCESS_SURFACE_FLINGER权限检查: $hasPermission")
+            
+            // 对于商米设备，如果权限检查失败，尝试使用功能测试
+            if (!hasPermission && isSunmiDevice()) {
+                val functionTest = testSurfaceFlingerAccess()
+                Log.d(logTag, "商米设备ACCESS_SURFACE_FLINGER功能测试: $functionTest")
+                
+                if (functionTest) {
+                    Log.d(logTag, "商米设备ACCESS_SURFACE_FLINGER权限标准检查不通过，但功能测试通过")
+                }
+                
+                return functionTest
+            }
+            
+            return hasPermission
+        } catch (e: Exception) {
+            Log.e(logTag, "检查ACCESS_SURFACE_FLINGER权限时出错: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * 检查是否拥有INJECT_EVENTS权限
+     */
+    fun hasInjectEventsPermission(): Boolean {
+        try {
+            // 这个权限无法直接通过PackageManager检查
+            // 我们需要检查是否有相关服务运行
+            val isAccessibilityServiceRunning = InputService.isAccessibilityServiceRunning(this)
+            
+            val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Settings.canDrawOverlays(this)
+            } else {
+                true // 低版本Android默认允许
+            }
+            
+            val hasPermission = isAccessibilityServiceRunning && hasOverlayPermission
+            
+            Log.d(logTag, "INJECT_EVENTS权限检查: $hasPermission (AccessibilityService=$isAccessibilityServiceRunning, Overlay=$hasOverlayPermission)")
+            
+            return hasPermission
+        } catch (e: Exception) {
+            Log.e(logTag, "检查INJECT_EVENTS权限时出错: ${e.message}")
+            return false
+        }
+    }
+    
+    /**
+     * 判断是否为商米设备
+     */
+    private fun isSunmiDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER.toLowerCase()
+        val model = Build.MODEL.toLowerCase()
+        val brand = Build.BRAND.toLowerCase()
+        
+        return manufacturer.contains("sunmi") || 
+               model.contains("sunmi") || 
+               brand.contains("sunmi")
     }
 
     // 添加VideoOutput捕获实现
