@@ -237,8 +237,11 @@ class _ServerPageState extends State<ServerPage> {
                                   children: [
                                     Expanded(
                                       child: ElevatedButton(
-                                        onPressed: () {
-                                          gFFI.serverModel.checkSystemPermissionStatus();
+                                        onPressed: () async {
+                                          await gFFI.serverModel.checkSystemPermissions();
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text(translate('系统权限状态已检查，请查看悬浮通知'))),
+                                          );
                                         },
                                         child: Text(translate("检查系统权限状态")),
                                       ),
@@ -250,8 +253,11 @@ class _ServerPageState extends State<ServerPage> {
                                   children: [
                                     Expanded(
                                       child: ElevatedButton(
-                                        onPressed: () {
-                                          gFFI.serverModel.testScreenCapture();
+                                        onPressed: () async {
+                                          await gFFI.serverModel.testScreenCapture();
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text(translate('屏幕捕获测试已启动，请查看悬浮通知'))),
+                                          );
                                         },
                                         child: Text(translate("测试屏幕捕获功能")),
                                       ),
@@ -263,8 +269,29 @@ class _ServerPageState extends State<ServerPage> {
                                   children: [
                                     Expanded(
                                       child: ElevatedButton(
-                                        onPressed: () {
-                                          gFFI.serverModel.requestSystemPermissions();
+                                        onPressed: () async {
+                                          try {
+                                            final result = await gFFI.serverModel.requestSystemPermissions();
+                                            if (result.containsKey('error')) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(translate('权限请求失败: ${result['error']}')),
+                                                  backgroundColor: Colors.red,
+                                                ),
+                                              );
+                                            } else {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text(translate('权限请求已完成'))),
+                                              );
+                                            }
+                                          } catch (e) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text(translate('请求系统权限异常: $e')),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
                                         },
                                         child: Text(translate("请求系统权限")),
                                       ),
@@ -300,7 +327,25 @@ class _ServerPageState extends State<ServerPage> {
                                     Expanded(
                                       child: ElevatedButton(
                                         onPressed: () async {
-                                          final permissions = await gFFI.serverModel.checkSystemPermissions();
+                                          final permissions = await gFFI.serverModel.checkSystemPermissionStatus();
+                                          if (permissions == null || permissions.isEmpty || permissions.containsKey('error')) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text(translate('获取权限状态失败: ${permissions['error'] ?? "未知错误"}')),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                            return;
+                                          }
+                                          
+                                          // 过滤掉不是布尔值的项
+                                          final filteredPermissions = Map<String, bool>.from(
+                                            permissions.map((key, value) => 
+                                              MapEntry(key, value is bool ? value : false))
+                                            ..removeWhere((key, value) => key == 'error' || key == 'is_sunmi_device')
+                                          );
+                                          
+                                          if (!mounted) return;
                                           showDialog(
                                             context: context,
                                             builder: (context) => AlertDialog(
@@ -308,7 +353,7 @@ class _ServerPageState extends State<ServerPage> {
                                               content: Column(
                                                 mainAxisSize: MainAxisSize.min,
                                                 crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: permissions.entries.map((entry) {
+                                                children: filteredPermissions.entries.map((entry) {
                                                   return Padding(
                                                     padding: const EdgeInsets.symmetric(vertical: 4),
                                                     child: Row(
@@ -346,10 +391,19 @@ class _ServerPageState extends State<ServerPage> {
                                       child: ElevatedButton(
                                         onPressed: () async {
                                           try {
-                                            await gFFI.serverModel.requestSystemPermissions();
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text(translate('权限请求已完成'))),
-                                            );
+                                            final result = await gFFI.serverModel.requestSystemPermissions();
+                                            if (result.containsKey('error')) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(translate('权限请求失败: ${result['error']}')),
+                                                  backgroundColor: Colors.red,
+                                                ),
+                                              );
+                                            } else {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text(translate('权限请求已完成'))),
+                                              );
+                                            }
                                           } catch (e) {
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
