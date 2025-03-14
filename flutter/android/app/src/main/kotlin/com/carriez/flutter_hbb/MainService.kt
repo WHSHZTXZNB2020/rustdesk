@@ -44,6 +44,21 @@ import java.nio.ByteBuffer
 import java.io.FileInputStream
 import kotlin.math.max
 import kotlin.math.min
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.pm.ServiceInfo
+import android.content.res.Resources
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Binder
+import android.view.SurfaceControl
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import android.graphics.Point
+import java.util.concurrent.atomic.AtomicBoolean
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -200,6 +215,15 @@ class MainService : Service() {
             get() = _isStart
         val isAudioStart: Boolean
             get() = _isAudioStart
+        
+        init {
+            try {
+                System.loadLibrary("rustdesk")
+                Log.d("MainService", "rustdesk native library loaded successfully")
+            } catch (e: UnsatisfiedLinkError) {
+                Log.e("MainService", "Failed to load rustdesk native library: ${e.message}")
+            }
+        }
     }
 
     private val logTag = "LOG_SERVICE"
@@ -222,6 +246,18 @@ class MainService : Service() {
     private lateinit var notificationChannel: String
     private lateinit var notificationBuilder: NotificationCompat.Builder
 
+    // 添加缺少的成员变量
+    private var _mediaProjection: MediaProjection? = null
+    private var _virtualDisplay: VirtualDisplay? = null
+    private lateinit var mContext: Context
+    private var mSurfaceControl: SurfaceControl? = null
+    private var mCurrentCaptureMethod: String = "None"
+    
+    // 添加原生方法的声明 - 这里只是声明，实际实现应在C++代码中
+    private external fun nativeInit(packageName: String, surface: Surface): Boolean
+    private external fun nativeInitFrameBuffer(packageName: String): Boolean
+    private external fun nativeInitVideoCapture(packageName: String): Boolean
+
     override fun onCreate() {
         super.onCreate()
         Log.d(logTag,"MainService onCreate, sdk int:${Build.VERSION.SDK_INT}")
@@ -243,6 +279,22 @@ class MainService : Service() {
         
         // 检查系统权限并设置就绪状态
         checkSystemPermissions()
+
+        mContext = this.applicationContext
+        
+        // 初始化SurfaceControl
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                // 这里应该是实际创建SurfaceControl的代码
+                // 由于Android版本和厂商实现的差异，实际代码可能需要调整
+                mSurfaceControl = SurfaceControl.Builder()
+                    .setName("RustDeskScreenCapture")
+                    .build()
+            } catch (e: Exception) {
+                Log.e("MainService", "Failed to create SurfaceControl: ${e.message}")
+                mSurfaceControl = null
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -1122,10 +1174,6 @@ class MainService : Service() {
         }
     }
     
-    // 必要的成员变量
-    private var mCurrentCaptureMethod: String = "未知"
-    private var _virtualDisplay: VirtualDisplay? = null
-
     // 测试并记录屏幕捕获结果
     private fun testAndLogScreenCapture() {
         Log.d(logTag, "【测试】开始测试屏幕捕获")
@@ -1192,5 +1240,11 @@ class MainService : Service() {
         if (anyMethodSucceeded && !hasCaptureVideoOutput && !hasReadFrameBuffer && !hasAccessSurfaceFlinger) {
             Log.d(logTag, "【测试】特殊情况: 权限检查显示无权限，但实际能够捕获屏幕。这在商米设备上是正常的。")
         }
+    }
+
+    // 添加start方法
+    fun start() {
+        Log.d("MainService", "Starting service...")
+        // 这里添加启动服务的逻辑
     }
 }
