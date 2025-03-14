@@ -343,6 +343,56 @@ class MainService : Service() {
                         Log.d(logTag, "系统权限未就绪或已经启动捕获，不执行操作")
                     }
                 }
+                "TEST_SCREEN_CAPTURE" -> {
+                    Log.d(logTag, "测试屏幕捕获功能")
+                    
+                    // 检查系统权限并记录详细日志
+                    val pm = applicationContext.packageManager
+                    val captureVideoOutput = pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName) == PackageManager.PERMISSION_GRANTED
+                    val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
+                    val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
+                    
+                    Log.d(logTag, "【测试】系统权限状态: CAPTURE_VIDEO_OUTPUT=$captureVideoOutput, READ_FRAME_BUFFER=$readFrameBuffer, ACCESS_SURFACE_FLINGER=$accessSurfaceFlinger")
+                    
+                    if (!captureVideoOutput && !readFrameBuffer && !accessSurfaceFlinger) {
+                        Log.e(logTag, "【测试】没有获得任何屏幕捕获权限，无法进行测试")
+                        return@let
+                    }
+                    
+                    // 尝试各种捕获方法
+                    if (accessSurfaceFlinger) {
+                        try {
+                            Log.d(logTag, "【测试】尝试使用SurfaceFlinger捕获屏幕")
+                            val result = trySurfaceFlinger()
+                            Log.d(logTag, "【测试】SurfaceFlinger捕获结果: $result")
+                        } catch (e: Exception) {
+                            Log.e(logTag, "【测试】SurfaceFlinger捕获异常: ${e.message}")
+                        }
+                    }
+                    
+                    if (readFrameBuffer) {
+                        try {
+                            Log.d(logTag, "【测试】尝试使用FrameBuffer捕获屏幕")
+                            val result = tryFrameBuffer()
+                            Log.d(logTag, "【测试】FrameBuffer捕获结果: $result")
+                        } catch (e: Exception) {
+                            Log.e(logTag, "【测试】FrameBuffer捕获异常: ${e.message}")
+                        }
+                    }
+                    
+                    if (captureVideoOutput) {
+                        try {
+                            Log.d(logTag, "【测试】尝试使用VideoOutput捕获屏幕")
+                            val result = tryVideoOutput()
+                            Log.d(logTag, "【测试】VideoOutput捕获结果: $result")
+                        } catch (e: Exception) {
+                            Log.e(logTag, "【测试】VideoOutput捕获异常: ${e.message}")
+                        }
+                    }
+                }
+                "STOP_SERVICE" -> {
+                    stopSelf()
+                }
                 ACT_INIT_MEDIA_PROJECTION_AND_SERVICE -> {
                     // 兼容传统MediaProjection方式
                     Log.d(logTag, "使用传统MediaProjection方式启动")
@@ -462,21 +512,22 @@ class MainService : Service() {
 
     fun startCapture(): Boolean {
         if (isStart) {
+            Log.d(logTag, "【屏幕捕获】已经启动，不重复启动")
             return true
         }
         
         if (!isReady) {
-            Log.e(logTag, "Cannot start capture: system permissions not granted")
+            Log.e(logTag, "【屏幕捕获】无法启动捕获：系统权限未授予")
             return false
         }
         
         updateScreenInfo(resources.configuration.orientation)
-        Log.d(logTag, "Start Capture")
+        Log.d(logTag, "【屏幕捕获】开始屏幕捕获流程")
         
         // 创建Surface用于显示捕获内容
         surface = createSurface()
         if (surface == null) {
-            Log.e(logTag, "Failed to create surface")
+            Log.e(logTag, "【屏幕捕获】创建Surface失败")
             return false
         }
         
@@ -494,10 +545,11 @@ class MainService : Service() {
             
             // 通知状态更新
             notifyStateChanged()
+            Log.d(logTag, "【屏幕捕获】捕获流程启动成功")
             return true
         }
         
-        Log.e(logTag, "Failed to start screen capture")
+        Log.e(logTag, "【屏幕捕获】屏幕捕获启动失败")
         return false
     }
     
@@ -515,7 +567,7 @@ class MainService : Service() {
     // 使用系统权限开始屏幕捕获
     private fun startScreenCapture(): Boolean {
         try {
-            Log.d(logTag, "Starting screen capture with system permissions")
+            Log.d(logTag, "【屏幕捕获】尝试开始使用系统权限捕获屏幕")
             
             // 尝试使用各种系统权限方法
             val pm = applicationContext.packageManager
@@ -525,23 +577,28 @@ class MainService : Service() {
             val hasReadFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED 
             val hasAccessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
             
+            Log.d(logTag, "【屏幕捕获】权限状态: CAPTURE_VIDEO_OUTPUT=$hasCaptureVideoOutput, READ_FRAME_BUFFER=$hasReadFrameBuffer, ACCESS_SURFACE_FLINGER=$hasAccessSurfaceFlinger")
+            
             // 按优先级尝试不同捕获方法
             if (hasAccessSurfaceFlinger && tryCaptureSurfaceFlinger()) {
+                Log.d(logTag, "【屏幕捕获】成功启动SurfaceFlinger捕获")
                 return true
             }
             
             if (hasReadFrameBuffer && tryReadFrameBuffer()) {
+                Log.d(logTag, "【屏幕捕获】成功启动FrameBuffer捕获")
                 return true
             }
             
             if (hasCaptureVideoOutput && tryCaptureVideoOutput()) {
+                Log.d(logTag, "【屏幕捕获】成功启动VideoOutput捕获")
                 return true
             }
             
-            Log.e(logTag, "All capture methods failed")
+            Log.e(logTag, "【屏幕捕获】所有捕获方法均失败")
             return false
         } catch (e: Exception) {
-            Log.e(logTag, "Error starting screen capture: ${e.message}")
+            Log.e(logTag, "【屏幕捕获】错误: ${e.message}")
             return false
         }
     }
@@ -663,7 +720,7 @@ class MainService : Service() {
         // 在您的定制系统上，有了ACCESS_SURFACE_FLINGER权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "正在使用SurfaceFlinger API捕获屏幕，该API基于系统权限无需用户确认")
+        Log.d(logTag, "【屏幕捕获-SurfaceFlinger】开始捕获，基于系统权限无需用户确认")
         try {
             while (isCapturing) {
                 // ImageReader会通过onImageAvailableListener自动接收图像
@@ -671,9 +728,9 @@ class MainService : Service() {
                 Thread.sleep(5) // 短暂睡眠以减少CPU使用
             }
         } catch (e: Exception) {
-            Log.e(logTag, "SurfaceFlinger捕获出错: ${e.message}")
+            Log.e(logTag, "【屏幕捕获-SurfaceFlinger】出错: ${e.message}")
         } finally {
-            Log.d(logTag, "SurfaceFlinger捕获已停止")
+            Log.d(logTag, "【屏幕捕获-SurfaceFlinger】已停止")
         }
     }
     
@@ -682,7 +739,7 @@ class MainService : Service() {
         // 在您的定制系统上，有了READ_FRAME_BUFFER权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "正在使用FrameBuffer API捕获屏幕，该API基于系统权限无需用户确认")
+        Log.d(logTag, "【屏幕捕获-FrameBuffer】开始捕获，基于系统权限无需用户确认")
         try {
             while (isCapturing) {
                 // ImageReader会通过onImageAvailableListener自动接收图像
@@ -690,9 +747,9 @@ class MainService : Service() {
                 Thread.sleep(5) // 短暂睡眠以减少CPU使用
             }
         } catch (e: Exception) {
-            Log.e(logTag, "FrameBuffer捕获出错: ${e.message}")
+            Log.e(logTag, "【屏幕捕获-FrameBuffer】出错: ${e.message}")
         } finally {
-            Log.d(logTag, "FrameBuffer捕获已停止")
+            Log.d(logTag, "【屏幕捕获-FrameBuffer】已停止")
         }
     }
     
@@ -701,7 +758,7 @@ class MainService : Service() {
         // 在您的定制系统上，有了CAPTURE_VIDEO_OUTPUT权限后
         // ImageReader和VirtualDisplay已经能够直接接收屏幕内容
         // 不需要额外的JNI代码
-        Log.d(logTag, "正在使用Video Output API捕获屏幕，该API基于系统权限无需用户确认")
+        Log.d(logTag, "【屏幕捕获-VideoOutput】开始捕获，基于系统权限无需用户确认")
         try {
             while (isCapturing) {
                 // ImageReader会通过onImageAvailableListener自动接收图像
@@ -709,9 +766,9 @@ class MainService : Service() {
                 Thread.sleep(5) // 短暂睡眠以减少CPU使用
             }
         } catch (e: Exception) {
-            Log.e(logTag, "Video Output捕获出错: ${e.message}")
+            Log.e(logTag, "【屏幕捕获-VideoOutput】出错: ${e.message}")
         } finally {
-            Log.d(logTag, "Video Output捕获已停止")
+            Log.d(logTag, "【屏幕捕获-VideoOutput】已停止")
         }
     }
 
@@ -897,5 +954,47 @@ class MainService : Service() {
             .setContentText(text)
             .build()
         notificationManager.notify(DEFAULT_NOTIFY_ID, notification)
+    }
+
+    // 测试SurfaceFlinger捕获方法
+    private fun trySurfaceFlinger(): Boolean {
+        try {
+            Log.d(logTag, "测试SurfaceFlinger捕获")
+            // 实现此方法测试SurfaceFlinger捕获
+            // 实际实现应根据设备实际情况调整
+            val result = captureSurfaceFlingerFrames()
+            return result
+        } catch (e: Exception) {
+            Log.e(logTag, "SurfaceFlinger捕获测试异常: ${e.message}")
+            return false
+        }
+    }
+    
+    // 测试FrameBuffer捕获方法
+    private fun tryFrameBuffer(): Boolean {
+        try {
+            Log.d(logTag, "测试FrameBuffer捕获")
+            // 实现此方法测试FrameBuffer捕获
+            // 实际实现应根据设备实际情况调整
+            val result = captureFrameBufferFrames()
+            return result
+        } catch (e: Exception) {
+            Log.e(logTag, "FrameBuffer捕获测试异常: ${e.message}")
+            return false
+        }
+    }
+    
+    // 测试VideoOutput捕获方法
+    private fun tryVideoOutput(): Boolean {
+        try {
+            Log.d(logTag, "测试VideoOutput捕获")
+            // 实现此方法测试VideoOutput捕获
+            // 实际实现应根据设备实际情况调整
+            val result = captureVideoOutputFrames()
+            return result
+        } catch (e: Exception) {
+            Log.e(logTag, "VideoOutput捕获测试异常: ${e.message}")
+            return false
+        }
     }
 }
