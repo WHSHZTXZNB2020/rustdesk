@@ -696,7 +696,13 @@ class MainService : Service() {
     private fun tryCaptureSurfaceFlinger(): Boolean {
         try {
             // 创建Surface以接收SurfaceFlinger的输出
-            val surface = Surface(mSurfaceControl)
+            val surfaceControl = mSurfaceControl
+            if (surfaceControl == null) {
+                Log.e(logTag, "【屏幕捕获】SurfaceControl为空，无法进行SurfaceFlinger捕获")
+                return false
+            }
+            
+            val surface = Surface(surfaceControl)
             // 实际调用系统API
             val result = nativeInit(mContext.packageName, surface)
             Log.d(logTag, "【屏幕捕获】SurfaceFlinger尝试结果: $result")
@@ -1119,11 +1125,17 @@ class MainService : Service() {
             val displayService = getDisplayMethod.invoke(sunmiInstance)
             
             if (displayService != null) {
+                val surfaceControl = mSurfaceControl
+                if (surfaceControl == null) {
+                    Log.e(logTag, "【屏幕捕获】SurfaceControl为空，无法进行商米特定捕获")
+                    return false
+                }
+                
                 val displayServiceClass = displayService.javaClass
                 val captureMethod = displayServiceClass.getMethod("startCapture", Surface::class.java)
                 
                 // 传入我们的Surface对象进行捕获
-                val surface = Surface(mSurfaceControl)
+                val surface = Surface(surfaceControl)
                 val result = captureMethod.invoke(displayService, surface) as Boolean
                 
                 Log.d(logTag, "【屏幕捕获】商米特定API尝试结果: $result")
@@ -1145,6 +1157,12 @@ class MainService : Service() {
                 return false
             }
             
+            val surfaceControl = mSurfaceControl
+            if (surfaceControl == null) {
+                Log.e(logTag, "【屏幕捕获】SurfaceControl为空，无法进行MediaProjection捕获")
+                return false
+            }
+            
             // 获取屏幕尺寸
             val metrics = Resources.getSystem().displayMetrics
             val width = metrics.widthPixels
@@ -1152,7 +1170,7 @@ class MainService : Service() {
             val density = metrics.densityDpi
             
             // 创建虚拟显示
-            val surface = Surface(mSurfaceControl)
+            val surface = Surface(surfaceControl)
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
             
             _virtualDisplay = _mediaProjection!!.createVirtualDisplay(
