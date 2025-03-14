@@ -46,6 +46,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.os.Process
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
+import android.app.Activity
 
 
 class MainActivity : FlutterActivity() {
@@ -419,7 +422,7 @@ class MainActivity : FlutterActivity() {
                             }
                             
                             // 方式2：使用静默权限请求
-                            val success = requestInjectEventsPermissionSilent(activity)
+                            val success = requestInjectEventsPermissionSilent()
                             if (success && checkInjectEventsPermission(this)) {
                                 InputService(this)
                                 Log.d(logTag, "静默权限请求成功")
@@ -436,7 +439,7 @@ class MainActivity : FlutterActivity() {
                             if (Build.MANUFACTURER.toLowerCase().contains("sunmi")) {
                                 // 商米设备特殊处理
                                 Log.d(logTag, "检测到商米设备，尝试特殊方式")
-                                requestSunmiSpecificInputPermission(activity)
+                                requestSunmiSpecificInputPermission()
                                 
                                 // 等待权限可能的授予
                                 Handler(Looper.getMainLooper()).postDelayed({
@@ -1147,46 +1150,99 @@ class MainActivity : FlutterActivity() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
     }
     
-    // 请求静默方式获取INJECT_EVENTS权限（无UI弹窗）
-    private fun requestInjectEventsPermissionSilent(context: Context): Boolean {
-        Log.d(logTag, "尝试静默获取INJECT_EVENTS权限")
+    /**
+     * 检查是否有INJECT_EVENTS权限
+     */
+    private fun checkInjectEventsPermission(context: Context): Boolean {
+        return try {
+            if (mainService != null) {
+                mainService!!.hasInjectEventsPermission()
+            } else {
+                // 通过标准方式检查权限
+                val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Settings.canDrawOverlays(context) && 
+                    isAccessibilityServiceRunning(context)
+                } else {
+                    isAccessibilityServiceRunning(context)
+                }
+                
+                Log.d(logTag, "INJECT_EVENTS权限状态: $hasPermission")
+                hasPermission
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "检查INJECT_EVENTS权限失败: ${e.message}")
+            false
+        }
+    }
+    
+    /**
+     * 检查辅助功能服务是否运行
+     */
+    private fun isAccessibilityServiceRunning(context: Context): Boolean {
+        val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabledServices = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        
+        for (service in enabledServices) {
+            if (service.id.contains(context.packageName)) {
+                return true
+            }
+        }
+        return false
+    }
+    
+    /**
+     * 静默方式请求INJECT_EVENTS权限 (适用于商米设备)
+     */
+    private fun requestInjectEventsPermissionSilent(): Boolean {
+        Log.d(logTag, "静默方式请求INJECT_EVENTS权限")
         try {
-            // 适用于商米设备的静默权限授予
-            if (Build.MANUFACTURER.toLowerCase().contains("sunmi")) {
-                // 尝试使用反射调用商米特有的API
-                try {
-                    val serviceManager = context.getSystemService("permission")
-                    if (serviceManager != null) {
-                        val serviceClass = serviceManager.javaClass
-                        val grantMethod = serviceClass.getMethod("grantRuntimePermission", 
-                            String::class.java, String::class.java, Int::class.java)
-                        
-                        grantMethod.invoke(serviceManager, context.packageName, 
-                            "android.permission.INJECT_EVENTS", Process.myUid())
-                        
-                        Log.d(logTag, "商米设备特有API权限授予尝试完成")
-                        return true
+            if (isSunmiDevice()) {
+                // 商米设备尝试使用系统API直接获取权限
+                Log.d(logTag, "商米设备环境，尝试使用系统API直接获取INJECT_EVENTS权限")
+                
+                // 尝试启动AccessibilityService
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+                
+                // 等待一段时间
+                Thread.sleep(500)
+                
+                // 检查权限状态
+                val hasPermission = checkInjectEventsPermission(this)
+                Log.d(logTag, "商米设备静默权限请求后状态: $hasPermission")
+                
+                if (hasPermission) {
+                    // 成功获取权限，初始化InputService
+                    try {
+                        val inputServiceIntent = Intent(this, InputService::class.java)
+                        startService(inputServiceIntent)
+                        Log.d(logTag, "InputService初始化成功")
+                    } catch (e: Exception) {
+                        Log.e(logTag, "InputService初始化失败: ${e.message}")
                     }
+                    return true
+                }
+                
+                // 如果未成功获取权限，尝试使用商米特定方法
+                return requestSunmiSpecificInputPermission()
+            } else {
+                // 非商米设备，尝试标准方式请求
+                Log.d(logTag, "非商米设备，尝试标准方式请求INJECT_EVENTS权限")
+                
+                // 尝试启动InputService
+                try {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    startActivity(intent)
+                    return true
                 } catch (e: Exception) {
-                    Log.e(logTag, "商米特有API调用失败: ${e.message}")
+                    Log.e(logTag, "启动辅助功能设置失败: ${e.message}")
+                    return false
                 }
             }
-            
-            // 尝试通过Settings方式授权（部分设备支持）
-            try {
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                Log.d(logTag, "已打开辅助功能设置，请用户手动授权")
-                // 返回false因为这需要用户交互
-                return false
-            } catch (e: Exception) {
-                Log.e(logTag, "打开辅助功能设置失败: ${e.message}")
-            }
-            
-            return false
         } catch (e: Exception) {
-            Log.e(logTag, "静默获取权限失败: ${e.message}")
+            Log.e(logTag, "静默请求INJECT_EVENTS权限失败: ${e.message}")
             return false
         }
     }
@@ -1218,41 +1274,34 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    // 商米设备特有的输入权限请求方法
-    private fun requestSunmiSpecificInputPermission(activity: Activity) {
-        Log.d(logTag, "尝试商米特有方式获取输入控制权限")
+    /**
+     * 商米特定的输入控制权限请求方法
+     */
+    private fun requestSunmiSpecificInputPermission(): Boolean {
         try {
-            // 尝试使用系统属性设置
-            try {
-                val systemPropertiesClass = Class.forName("android.os.SystemProperties")
-                val setMethod = systemPropertiesClass.getMethod("set", String::class.java, String::class.java)
-                setMethod.invoke(null, "persist.sys.sunmi.input_permission", "granted")
-                Log.d(logTag, "已尝试设置系统属性")
-            } catch (e: Exception) {
-                Log.e(logTag, "设置系统属性失败: ${e.message}")
+            // 尝试使用商米特定的Intent打开辅助功能设置
+            val intent = Intent().apply {
+                setClassName("com.sunmi.permissions", "com.sunmi.permissions.AccessibilityManagerActivity")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             
-            // 尝试使用商米特有的Intent
-            try {
-                val intent = Intent("com.sunmi.action.GRANT_INPUT_PERMISSION")
-                intent.putExtra("package", activity.packageName)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                activity.sendBroadcast(intent)
-                Log.d(logTag, "已发送商米特有广播")
-            } catch (e: Exception) {
-                Log.e(logTag, "发送广播失败: ${e.message}")
-            }
-            
-            // 尝试直接启动InputService
-            try {
-                val intent = Intent(activity, InputService::class.java)
-                activity.startService(intent)
-                Log.d(logTag, "已尝试直接启动InputService")
-            } catch (e: Exception) {
-                Log.e(logTag, "启动InputService失败: ${e.message}")
+            // 检查Intent是否可被解析
+            if (intent.resolveActivity(packageManager) != null) {
+                Log.d(logTag, "打开商米辅助功能管理界面")
+                startActivity(intent)
+                return true
+            } else {
+                Log.d(logTag, "商米辅助功能管理应用不可用，尝试使用标准方法")
+                
+                // 尝试标准方式打开辅助功能设置
+                val accessibilityIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                accessibilityIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(accessibilityIntent)
+                return true
             }
         } catch (e: Exception) {
-            Log.e(logTag, "商米特有方式获取权限失败: ${e.message}")
+            Log.e(logTag, "请求商米特定输入控制权限失败: ${e.message}")
+            return false
         }
     }
 }
