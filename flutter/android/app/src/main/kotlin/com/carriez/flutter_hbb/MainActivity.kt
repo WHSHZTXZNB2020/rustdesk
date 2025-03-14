@@ -35,7 +35,7 @@ import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 import android.content.pm.PackageManager
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import android.hardware.display.Display
+import android.view.Display
 import android.hardware.display.DisplayManager
 import android.widget.Toast
 import java.io.File
@@ -832,7 +832,7 @@ class MainActivity : FlutterActivity() {
     }
     
     // 测试DisplayOutput捕获
-    private fun testCaptureDisplayOutput(display: Display): Boolean {
+    private fun testCaptureDisplayOutput(display: android.view.Display): Boolean {
         try {
             // 尝试创建虚拟显示以测试视频捕获权限
             // 这只是一个简单测试，实际上不会捕获
