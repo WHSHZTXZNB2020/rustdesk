@@ -107,6 +107,28 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Exception) {
                     result.error("SCREEN_CAPTURE_TEST_FAILED", e.message, null)
                 }
+            } else if (call.method == "get_device_info") {
+                // 获取设备信息
+                val deviceInfo = HashMap<String, Any>()
+                
+                // 添加厂商信息
+                deviceInfo["manufacturer"] = Build.MANUFACTURER ?: ""
+                deviceInfo["model"] = Build.MODEL ?: ""
+                deviceInfo["brand"] = Build.BRAND ?: ""
+                deviceInfo["device"] = Build.DEVICE ?: ""
+                deviceInfo["product"] = Build.PRODUCT ?: ""
+                deviceInfo["hardware"] = Build.HARDWARE ?: ""
+                deviceInfo["sdk"] = Build.VERSION.SDK_INT
+                
+                // 检查是否为商米设备
+                val isSunmi = Build.MANUFACTURER.toLowerCase().contains("sunmi") ||
+                              Build.MODEL.toLowerCase().contains("sunmi") ||
+                              Build.BRAND.toLowerCase().contains("sunmi")
+                              
+                deviceInfo["is_sunmi_device"] = isSunmi
+                
+                // 返回设备信息
+                result.success(deviceInfo)
             } else {
                 result.notImplemented()
             }
