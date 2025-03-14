@@ -33,6 +33,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
+import android.content.pm.PackageManager
 
 
 class MainActivity : FlutterActivity() {
@@ -271,40 +272,87 @@ class MainActivity : FlutterActivity() {
                             )
                             result.success(true)
                         } catch (e: Exception) {
-                            Log.e(logTag, "定制系统中初始化InputService失败: ${e.message}")
-                            // 如果失败，回退到普通方式
-                            if (!checkInjectEventsPermission(this)) {
-                                requestInjectEventsPermission(this) { granted ->
-                                    if (granted) {
-                                        try {
-                                            InputService(this)
-                                            // 成功初始化后更新状态
-                                            activity.runOnUiThread {
-                                                Companion.flutterMethodChannel?.invokeMethod(
-                                                    "on_state_changed",
-                                                    mapOf("name" to "input", "value" to "true")
-                                                )
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e(logTag, "Error initializing InputService after permission: ${e.message}")
-                                        }
-                                    }
-                                    activity.runOnUiThread {
-                                        Companion.flutterMethodChannel?.invokeMethod(
-                                            "on_state_changed",
-                                            mapOf(
-                                                "name" to "input",
-                                                "value" to InputService.isOpen.toString()
-                                            )
-                                        )
-                                    }
-                                }
-                            }
+                            Log.e(logTag, "定制系统初始化InputService失败: ${e.message}")
                             result.success(false)
                         }
                     } else {
                         result.success(true)
                     }
+                }
+                "check_system_permissions" -> {
+                    Log.d(logTag, "检查系统权限状态")
+                    val pm = applicationContext.packageManager
+                    val captureVideoOutput = pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName) == PackageManager.PERMISSION_GRANTED
+                    val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
+                    val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
+                    
+                    // 记录权限状态到日志
+                    Log.d(logTag, "系统权限状态: CAPTURE_VIDEO_OUTPUT=$captureVideoOutput, READ_FRAME_BUFFER=$readFrameBuffer, ACCESS_SURFACE_FLINGER=$accessSurfaceFlinger")
+                    
+                    // 返回权限状态到Flutter
+                    val isReady = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
+                    val resultMap = mapOf(
+                        "capture_video_output" to captureVideoOutput,
+                        "read_frame_buffer" to readFrameBuffer,
+                        "access_surface_flinger" to accessSurfaceFlinger,
+                        "is_ready" to isReady
+                    )
+                    result.success(resultMap)
+                }
+                "test_screen_capture" -> {
+                    Log.d(logTag, "测试屏幕捕获功能")
+                    val resultMap = mutableMapOf<String, Any>()
+                    
+                    try {
+                        // 测试是否已经有正在运行的服务
+                        val isServiceRunning = MainService.isStart
+                        if (isServiceRunning) {
+                            resultMap["capture_method"] = "已有服务正在运行"
+                            resultMap["capture_status"] = "服务已启动，但可能未正确捕获"
+                            result.success(resultMap)
+                            return@MethodCallHandler
+                        }
+                        
+                        // 检查系统权限
+                        val pm = applicationContext.packageManager
+                        val captureVideoOutput = pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName) == PackageManager.PERMISSION_GRANTED
+                        val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
+                        val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
+                        
+                        if (!captureVideoOutput && !readFrameBuffer && !accessSurfaceFlinger) {
+                            resultMap["capture_method"] = "无可用权限"
+                            resultMap["capture_status"] = "失败"
+                            resultMap["error"] = "没有获得任何屏幕捕获权限"
+                            result.success(resultMap)
+                            return@MethodCallHandler
+                        }
+                        
+                        // 启动临时服务测试屏幕捕获
+                        val intent = Intent(this, MainService::class.java)
+                        intent.action = "TEST_SCREEN_CAPTURE"
+                        startService(intent)
+                        
+                        // 等待结果 (实际操作应使用Handler或回调)
+                        Thread.sleep(1000)
+                        
+                        // 理论上服务应该在内部记录成功/失败
+                        resultMap["capture_method"] = if (accessSurfaceFlinger) "SurfaceFlinger" 
+                                                    else if (readFrameBuffer) "FrameBuffer"
+                                                    else "VideoOutput"
+                        resultMap["capture_status"] = "测试完成，请查看日志详情"
+                        
+                        // 停止测试服务
+                        val stopIntent = Intent(this, MainService::class.java)
+                        stopIntent.action = "STOP_SERVICE"
+                        startService(stopIntent)
+                        
+                    } catch (e: Exception) {
+                        resultMap["capture_method"] = "测试过程异常"
+                        resultMap["capture_status"] = "失败"
+                        resultMap["error"] = e.message ?: "未知错误"
+                    }
+                    
+                    result.success(resultMap)
                 }
                 "stop_input" -> {
                     InputService.ctx?.disableSelf()
