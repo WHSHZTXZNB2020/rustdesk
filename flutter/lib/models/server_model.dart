@@ -899,7 +899,34 @@ class ServerModel with ChangeNotifier {
     }
   }
 
-  /// 应用启动时自动启动远程服务并获取所有权限（完善版）
+  /// 添加requestSystemPermissionsWithResult方法
+  /// 请求系统权限并获取结果
+  Future<Map<String, dynamic>> requestSystemPermissionsWithResult() async {
+    try {
+      final result = await platformFFI.invokeMethod("request_system_permissions");
+      debugPrint("系统权限请求结果: $result");
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      } else {
+        debugPrint("系统权限请求返回了非Map结果: $result");
+        // 如果返回的不是Map，返回空结果
+        return {
+          "error": "非预期结果格式",
+          "is_ready": false,
+          "is_sunmi_device": await _isSunmiDevice()
+        };
+      }
+    } catch (e) {
+      debugPrint("请求系统权限异常: $e");
+      return {
+        "error": e.toString(),
+        "request_attempt": false,
+        "is_sunmi_device": await _isSunmiDevice(),
+      };
+    }
+  }
+
+  /// 应用启动时自动启动远程服务并获取所有权限
   Future<void> autoStartService() async {
     try {
       debugPrint("自动启动远程服务流程开始");
@@ -916,19 +943,19 @@ class ServerModel with ChangeNotifier {
       // 优先检查并请求商米平台的三个特殊动态权限
       // CAPTURE_VIDEO_OUTPUT, READ_FRAME_BUFFER, ACCESS_SURFACE_FLINGER
       debugPrint("优先请求商米平台特有的屏幕捕获权限");
-      final systemPermissionsMap = await requestSystemPermissionsWithResult();
-      debugPrint("商米特有系统权限请求结果: $systemPermissionsMap");
+      final result = await requestSystemPermissionsWithResult();
+      debugPrint("商米特有系统权限请求结果: $result");
       
       // 处理商米平台特有的权限管理方式
-      final isSunmiDevice = systemPermissionsMap['is_sunmi_device'] == true;
+      final isSunmiDevice = result['is_sunmi_device'] == true;
       
       if (isSunmiDevice) {
         debugPrint("检测到商米设备，采用商米平台特有的权限处理方式");
         
         // 检查权限状态 - 这里我们既检查标准的权限状态，也执行功能测试
-        final permissionsGranted = systemPermissionsMap['capture_video_output'] == true || 
-                                   systemPermissionsMap['read_frame_buffer'] == true || 
-                                   systemPermissionsMap['access_surface_flinger'] == true;
+        final permissionsGranted = result['capture_video_output'] == true || 
+                               result['read_frame_buffer'] == true || 
+                               result['access_surface_flinger'] == true;
         
         debugPrint("通过标准权限检查的结果：$permissionsGranted");
         
@@ -938,7 +965,7 @@ class ServerModel with ChangeNotifier {
         try {
           final testResult = await testScreenCaptureWithResult();
           debugPrint('屏幕捕获功能测试结果: $testResult');
-          functionalityAvailable = testResult['capture_status'] == true;
+          functionalityAvailable = testResult;
         } catch (e) {
           debugPrint('功能测试失败: $e');
         }
@@ -947,17 +974,17 @@ class ServerModel with ChangeNotifier {
         if (functionalityAvailable) {
           debugPrint("商米设备功能测试通过，忽略标准权限检查结果");
         } else if (!permissionsGranted) {
-          // 如果功能测试和权限检查都失败，提示用户
+          // 如果功能测试和权限检查都失败，重试请求系统权限
           debugPrint("商米设备权限检查和功能测试均失败");
           debugPrint("请通过商米平台管理界面授予应用所需权限");
           
-          // 尝试通过本地方法再次请求
-          await requestSystemPermissions();
+          // 尝试通过标准方法再次请求
+          await platformFFI.invokeMethod('request_system_permissions');
           
           // 再次检查功能
           try {
             final retestResult = await testScreenCaptureWithResult();
-            functionalityAvailable = retestResult['capture_status'] == true;
+            functionalityAvailable = retestResult;
             debugPrint('权限请求后屏幕捕获重新测试结果: $functionalityAvailable');
           } catch (e) {
             debugPrint('权限请求后功能重新测试失败: $e');
@@ -997,6 +1024,7 @@ class ServerModel with ChangeNotifier {
       // 自动启动远程服务
       debugPrint("自动启动远程服务");
       
+      final isSunmiDevice = await _isSunmiDevice();
       if (isSunmiDevice) {
         // 商米设备使用无需权限的方式启动服务
         debugPrint("商米设备使用无需权限方式启动服务");
@@ -1099,7 +1127,7 @@ class ServerModel with ChangeNotifier {
     return false;
   }
 
-  Future<void> checkSystemPermissionStatus() async {
+  Future<void> checkSystemPermissions() async {
     if (!isAndroid) return;
     try {
       final result = await platformFFI.invokeMethod('check_system_permissions');
@@ -1141,146 +1169,21 @@ class ServerModel with ChangeNotifier {
     }
   }
 
-  Future<void> requestSystemPermissions() async {
-    if (!isAndroid) return;
+  /// 测试屏幕捕获功能并返回结果
+  Future<bool> testScreenCaptureWithResult() async {
     try {
-      final result = await platformFFI.invokeMethod('request_system_permissions');
-      if (result != null && result is Map) {
-        final status = StringBuilder();
-        status.writeln("系统权限请求结果:");
-        status.writeln("是否为商米设备: ${result['is_sunmi_device']}");
-        status.writeln("请求尝试状态: ${result['request_attempt']}");
-        
-        if (result.containsKey('error')) {
-          status.writeln("错误: ${result['error']}");
-        } else {
-          status.writeln("CAPTURE_VIDEO_OUTPUT: ${result['capture_video_output']}");
-          status.writeln("READ_FRAME_BUFFER: ${result['read_frame_buffer']}");
-          status.writeln("ACCESS_SURFACE_FLINGER: ${result['access_surface_flinger']}");
-          status.writeln("权限总体状态: ${result['is_ready']}");
-        }
-        
-        // 显示结果
-        showToast(status.toString(), timeout: Duration(seconds: 10));
-        
-        // 如果权限状态发生变化，更新UI
-        if (result.containsKey('is_ready') && result['is_ready'] == true) {
-          notifyListeners();
-        }
-      }
-    } catch (e) {
-      debugPrint('请求系统权限失败: $e');
-      showToast('请求系统权限失败: $e', timeout: Duration(seconds: 5));
-    }
-  }
-
-  // 检查系统权限状态
-  Future<Map<String, bool>> checkSystemPermissions() async {
-    try {
-      debugPrint('检查系统权限状态');
-      final result = await platformFFI.invokeMethod('check_system_permissions');
+      debugPrint('测试屏幕捕获功能');
+      // 直接调用原始方法名，与MainActivity一致
+      final result = await platformFFI.invokeMethod('test_screen_capture');
       
+      debugPrint('屏幕捕获测试结果: $result');
       if (result is Map) {
-        // 将结果转换为Map<String, bool>
-        final Map<String, bool> permissionStatus = {};
-        result.forEach((key, value) {
-          if (key is String && value is bool) {
-            permissionStatus[key] = value;
-          }
-        });
-        
-        debugPrint('系统权限状态: $permissionStatus');
-        return permissionStatus;
+        return result['capture_status'] == true;
       }
-      
-      debugPrint('无法获取系统权限状态，结果格式错误: $result');
-      return {};
+      return result is bool ? result : false;
     } catch (e) {
-      debugPrint('检查系统权限出错: $e');
-      return {};
-    }
-  }
-  
-  /// 请求系统权限并获取结果（适用于商米平台特有权限）
-  Future<Map<String, dynamic>> requestSystemPermissionsWithResult() async {
-    try {
-      final result = await platformFFI.invokeMethod("request_system_permissions");
-      debugPrint("系统权限请求结果: $result");
-      if (result is Map) {
-        return Map<String, dynamic>.from(result);
-      } else {
-        debugPrint("系统权限请求返回了非地图结果: $result");
-        // 如果返回的不是地图，尝试使用标准权限检查方法获取状态
-        final status = await checkSystemPermissions();
-        return status;
-      }
-    } catch (e) {
-      debugPrint("请求系统权限异常: $e");
-      return {
-        "error": e.toString(),
-        "request_attempt": false,
-        "is_sunmi_device": await _isSunmiDevice(),
-      };
-    }
-  }
-  
-  /// 请求系统权限（适用于商米平台特有权限）
-  Future<bool> requestSystemPermissions() async {
-    try {
-      final result = await platformFFI.invokeMethod("request_system_permissions");
-      return result == true;
-    } catch (e) {
-      debugPrint("请求系统权限异常: $e");
+      debugPrint('测试屏幕捕获出错: $e');
       return false;
-    }
-  }
-  
-  /// 检查系统权限状态（适用于商米平台特有权限）
-  Future<Map<String, dynamic>> checkSystemPermissions() async {
-    try {
-      final result = await platformFFI.invokeMethod("check_system_permissions");
-      if (result is Map) {
-        return Map<String, dynamic>.from(result);
-      } else {
-        return {
-          "is_ready": false,
-          "is_sunmi_device": await _isSunmiDevice(),
-        };
-      }
-    } catch (e) {
-      debugPrint("检查系统权限异常: $e");
-      return {
-        "error": e.toString(),
-        "is_ready": false,
-        "is_sunmi_device": await _isSunmiDevice(),
-      };
-    }
-  }
-  
-  /// 测试屏幕捕获功能并获取详细结果
-  Future<Map<String, dynamic>> testScreenCaptureWithResult() async {
-    try {
-      debugPrint("测试屏幕捕获功能");
-      final result = await platformFFI.invokeMethod("test_screen_capture");
-      
-      if (result is Map) {
-        debugPrint("测试屏幕捕获结果: $result");
-        return Map<String, dynamic>.from(result);
-      } else {
-        debugPrint("测试屏幕捕获返回了非地图结果: $result");
-        return {
-          "capture_status": result == true,
-          "capture_method": "未知",
-          "is_sunmi_device": await _isSunmiDevice(),
-        };
-      }
-    } catch (e) {
-      debugPrint("测试屏幕捕获异常: $e");
-      return {
-        "capture_status": false,
-        "error": e.toString(),
-        "is_sunmi_device": await _isSunmiDevice(),
-      };
     }
   }
   
@@ -1295,17 +1198,26 @@ class ServerModel with ChangeNotifier {
       debugPrint("检查商米设备时出错: $e");
     }
     
-    // 通过其他方式检测：如制造商信息
-    final info = await deviceInfo;
-    final manufacturer = info["manufacturer"]?.toString().toLowerCase() ?? "";
-    final model = info["model"]?.toString().toLowerCase() ?? "";
-    final brand = info["brand"]?.toString().toLowerCase() ?? "";
+    // 使用Build信息替代deviceInfo
+    try {
+      final buildInfo = await platformFFI.invokeMethod("get_device_info");
+      if (buildInfo is Map) {
+        final manufacturer = (buildInfo["manufacturer"] as String?)?.toLowerCase() ?? "";
+        final model = (buildInfo["model"] as String?)?.toLowerCase() ?? "";
+        final brand = (buildInfo["brand"] as String?)?.toLowerCase() ?? "";
+        
+        return manufacturer.contains("sunmi") || 
+               model.contains("sunmi") || 
+               brand.contains("sunmi");
+      }
+    } catch (e) {
+      debugPrint("获取设备信息出错: $e");
+    }
     
-    return manufacturer.contains("sunmi") || 
-           model.contains("sunmi") || 
-           brand.contains("sunmi");
+    // 如果以上方法失败，默认返回false
+    return false;
   }
-
+  
   /// 使用无需权限的方式启动服务（适用于商米设备）
   Future<void> startServiceWithoutPermission() async {
     try {
