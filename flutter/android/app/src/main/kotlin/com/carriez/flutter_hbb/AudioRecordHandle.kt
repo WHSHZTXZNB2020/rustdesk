@@ -63,8 +63,8 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                     Log.d(logTag, "Using REMOTE_SUBMIX audio source")
                 } catch (e: Exception) {
                     try {
-                        builder.setAudioSource(MediaRecorder.AudioSource.MEDIA)
-                        Log.d(logTag, "Using MEDIA audio source")
+                        builder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+                        Log.d(logTag, "Using CAMCORDER audio source")
                     } catch (e: Exception) {
                         Log.e(logTag, "Failed to set audio source: ${e.message}")
                         return false
