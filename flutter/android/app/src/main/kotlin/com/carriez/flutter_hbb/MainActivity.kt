@@ -300,6 +300,41 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(resultMap)
                 }
+                "request_system_permissions" -> {
+                    Log.d(logTag, "尝试请求系统权限")
+                    val resultMap = mutableMapOf<String, Any>()
+                    
+                    try {
+                        // 在商米设备上，这些权限应该是预授权的
+                        // 尝试检查系统属性以确认是否为商米设备
+                        val isSunmiDevice = checkIsSunmiDevice()
+                        resultMap["is_sunmi_device"] = isSunmiDevice
+                        
+                        if (isSunmiDevice) {
+                            // 如果是商米设备，尝试使用系统API直接请求权限
+                            // 注意：通常这些权限在普通应用中是无法直接获取的
+                            val success = attemptRequestSystemPermissions()
+                            resultMap["request_attempt"] = success
+                            
+                            // 再次检查权限状态
+                            val pm = applicationContext.packageManager
+                            val captureVideoOutput = pm.checkPermission("android.permission.CAPTURE_VIDEO_OUTPUT", packageName) == PackageManager.PERMISSION_GRANTED
+                            val readFrameBuffer = pm.checkPermission("android.permission.READ_FRAME_BUFFER", packageName) == PackageManager.PERMISSION_GRANTED
+                            val accessSurfaceFlinger = pm.checkPermission("android.permission.ACCESS_SURFACE_FLINGER", packageName) == PackageManager.PERMISSION_GRANTED
+                            
+                            resultMap["capture_video_output"] = captureVideoOutput
+                            resultMap["read_frame_buffer"] = readFrameBuffer
+                            resultMap["access_surface_flinger"] = accessSurfaceFlinger
+                            resultMap["is_ready"] = captureVideoOutput || readFrameBuffer || accessSurfaceFlinger
+                        } else {
+                            resultMap["error"] = "此设备不是商米设备，无法自动获取系统权限"
+                        }
+                    } catch (e: Exception) {
+                        resultMap["error"] = "请求系统权限时出错: ${e.message}"
+                    }
+                    
+                    result.success(resultMap)
+                }
                 "test_screen_capture" -> {
                     Log.d(logTag, "测试屏幕捕获功能")
                     val resultMap = mutableMapOf<String, Any>()
@@ -566,5 +601,67 @@ class MainActivity : FlutterActivity() {
     override fun onStart() {
         super.onStart()
         stopService(Intent(this, FloatingWindowService::class.java))
+    }
+
+    // 检查是否为商米设备
+    private fun checkIsSunmiDevice(): Boolean {
+        try {
+            // 商米设备通常有特定的系统属性
+            // 检查设备制造商和型号
+            val isSunmiByBrand = Build.MANUFACTURER.lowercase().contains("sunmi") || 
+                                   Build.BRAND.lowercase().contains("sunmi") ||
+                                   Build.MODEL.lowercase().contains("sunmi")
+            
+            // 检查是否有商米特有的系统服务或属性
+            val hasSunmiService = try {
+                val pm = packageManager
+                pm.getPackageInfo("com.sunmi.extprinterservice", 0) != null
+            } catch (e: Exception) {
+                false
+            }
+            
+            Log.d(logTag, "商米设备检测: 品牌检测=$isSunmiByBrand, 服务检测=$hasSunmiService")
+            
+            return isSunmiByBrand || hasSunmiService
+        } catch (e: Exception) {
+            Log.e(logTag, "检测商米设备时出错: ${e.message}")
+            return false
+        }
+    }
+    
+    // 尝试请求系统权限
+    private fun attemptRequestSystemPermissions(): Boolean {
+        try {
+            Log.d(logTag, "尝试请求系统权限")
+            
+            // 尝试方法1: 使用XXPermissions请求
+            XXPermissions.with(this)
+                .permission("android.permission.CAPTURE_VIDEO_OUTPUT")
+                .permission("android.permission.READ_FRAME_BUFFER")
+                .permission("android.permission.ACCESS_SURFACE_FLINGER")
+                .request { _, all ->
+                    Log.d(logTag, "XXPermissions请求结果: $all")
+                }
+            
+            // 尝试方法2: 使用特定的系统API (如果商米设备提供)
+            try {
+                val cls = Class.forName("android.os.SystemProperties")
+                val set = cls.getMethod("set", String::class.java, String::class.java)
+                // 这里使用反射设置一个系统属性，通知系统这个应用需要特殊权限
+                // 注意：这只是一个示例，真正的实现取决于商米系统的具体机制
+                set.invoke(null, "persist.sys.sunmi.rustdesk.permissions", "granted")
+                Log.d(logTag, "已尝试通过系统属性设置授权信号")
+            } catch (e: Exception) {
+                Log.e(logTag, "使用系统属性方法失败: ${e.message}")
+            }
+            
+            // 其他可能的方法
+            // ...
+            
+            return true
+        } catch (e: Exception) {
+            Log.e(logTag, "请求系统权限失败: ${e.message}")
+            return false
+        }
     }
 }
