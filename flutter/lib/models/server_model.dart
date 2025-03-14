@@ -945,6 +945,39 @@ class ServerModel with ChangeNotifier {
       showToast('测试屏幕捕获失败: $e', timeout: Duration(seconds: 5));
     }
   }
+
+  Future<void> requestSystemPermissions() async {
+    if (!isAndroid) return;
+    try {
+      final result = await platformFFI.invokeMethod('request_system_permissions');
+      if (result != null && result is Map) {
+        final status = StringBuilder();
+        status.writeln("系统权限请求结果:");
+        status.writeln("是否为商米设备: ${result['is_sunmi_device']}");
+        status.writeln("请求尝试状态: ${result['request_attempt']}");
+        
+        if (result.containsKey('error')) {
+          status.writeln("错误: ${result['error']}");
+        } else {
+          status.writeln("CAPTURE_VIDEO_OUTPUT: ${result['capture_video_output']}");
+          status.writeln("READ_FRAME_BUFFER: ${result['read_frame_buffer']}");
+          status.writeln("ACCESS_SURFACE_FLINGER: ${result['access_surface_flinger']}");
+          status.writeln("权限总体状态: ${result['is_ready']}");
+        }
+        
+        // 显示结果
+        showToast(status.toString(), timeout: Duration(seconds: 10));
+        
+        // 如果权限状态发生变化，更新UI
+        if (result.containsKey('is_ready') && result['is_ready'] == true) {
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('请求系统权限失败: $e');
+      showToast('请求系统权限失败: $e', timeout: Duration(seconds: 5));
+    }
+  }
 }
 
 enum ClientType {
