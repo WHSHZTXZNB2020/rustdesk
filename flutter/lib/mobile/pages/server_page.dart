@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
-import 'package:flutter_hbb/mobile/widgets/dialog.dart';
-import 'package:flutter_hbb/models/chat_model.dart';
+import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
+import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/mobile/pages/home_page.dart';
+import 'package:flutter_hbb/mobile/pages/settings_page.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -267,6 +272,113 @@ class _ServerPageState extends State<ServerPage> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        // 添加系统权限按钮区
+                        if (Platform.isAndroid) ...[
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  translate('系统权限'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: () async {
+                                          final permissions = await gFFI.serverModel.checkSystemPermissions();
+                                          showDialog(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              title: Text(translate('权限状态')),
+                                              content: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: permissions.entries.map((entry) {
+                                                  return Padding(
+                                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(
+                                                          entry.value ? Icons.check_circle : Icons.cancel,
+                                                          color: entry.value ? Colors.green : Colors.red,
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Expanded(
+                                                          child: Text(
+                                                            entry.key.replaceAll('android.permission.', ''),
+                                                            style: const TextStyle(fontSize: 14),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.of(context).pop(),
+                                                  child: Text(translate('确定')),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                        child: Text(translate('检查权限')),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: () async {
+                                          try {
+                                            await gFFI.serverModel.requestSystemPermissions();
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text(translate('权限请求已完成'))),
+                                            );
+                                          } catch (e) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text(translate('权限请求失败')),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        child: Text(translate('请求权限')),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                ElevatedButton(
+                                  onPressed: () async {
+                                    await gFFI.serverModel.testScreenCapture();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(translate('屏幕捕获测试已启动，请查看日志'))),
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    minimumSize: const Size(double.infinity, 40),
+                                  ),
+                                  child: Text(translate('测试屏幕捕获')),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                       ],
                     ),
                   ),
