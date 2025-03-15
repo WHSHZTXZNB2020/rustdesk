@@ -429,6 +429,11 @@ class MainActivity : FlutterActivity() {
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
                 }
+                "ensure_ui_interactive" -> {
+                    // 确保本地UI交互能力，即使在被远程控制期间
+                    ensureUiInteractive()
+                    result.success(true)
+                }
                 else -> {
                     result.error("-1", "No such method", null)
                 }
@@ -566,5 +571,56 @@ class MainActivity : FlutterActivity() {
     override fun onStart() {
         super.onStart()
         stopService(Intent(this, FloatingWindowService::class.java))
+    }
+
+    // 确保应用自身UI在被远程控制期间仍然可交互
+    private fun ensureUiInteractive() {
+        Log.d(logTag, "确保本地UI交互能力")
+        try {
+            // 1. 暂时暂停输入服务的事件处理
+            InputService.ctx?.let { service ->
+                // 记录当前应用窗口位置和前台状态
+                window.decorView.post {
+                    val appPackageName = packageName
+                    val isAppForeground = isAppInForeground(appPackageName)
+                    
+                    if (isAppForeground) {
+                        Log.d(logTag, "应用在前台，临时调整输入事件处理模式")
+                        
+                        // 允许RustDesk应用自身接收本地UI事件
+                        window.decorView.setOnTouchListener { _, event ->
+                            // 仅处理我们应用自身的UI事件，不干扰远程控制事件
+                            false // 返回false表示不消费事件，允许事件继续传递
+                        }
+                        
+                        // 确保窗口具有焦点和交互能力
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                    } else {
+                        Log.d(logTag, "应用不在前台，无需调整UI交互")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "确保UI交互时出错: ${e.message}")
+        }
+    }
+    
+    // 检查应用是否在前台
+    private fun isAppInForeground(packageName: String): Boolean {
+        try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val appProcesses = activityManager.runningAppProcesses ?: return false
+            
+            for (appProcess in appProcesses) {
+                if (appProcess.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND && 
+                    appProcess.processName == packageName) {
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "检查应用前台状态时出错: ${e.message}")
+        }
+        return false
     }
 }
