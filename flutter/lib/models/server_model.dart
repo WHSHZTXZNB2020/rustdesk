@@ -526,7 +526,31 @@ class ServerModel with ChangeNotifier {
     }
     if (_clients.length != oldClientLenght) {
       notifyListeners();
-      if (isAndroid) androidUpdatekeepScreenOn();
+      if (isAndroid) {
+        androidUpdatekeepScreenOn();
+        // 确保本地UI交互能力
+        ensureLocalUiInteractive();
+      }
+    }
+  }
+
+  /// 确保本地UI交互能力，即使在远程控制期间
+  void ensureLocalUiInteractive() {
+    if (!isAndroid || _clients.isEmpty) return;
+    
+    try {
+      // 向MainActivity发送信号，临时调整输入事件处理模式
+      parent.target?.invokeMethod("ensure_ui_interactive");
+      
+      // 如果有活跃连接，安排定期调用确保UI交互能力
+      if (_clients.isNotEmpty && _clients.any((c) => !c.disconnected)) {
+        // 每3秒刷新一次UI交互能力，确保本地操作不受阻碍
+        Future.delayed(Duration(seconds: 3), () {
+          ensureLocalUiInteractive();
+        });
+      }
+    } catch (e) {
+      debugPrint("Error ensuring UI interactive: $e");
     }
   }
 
@@ -669,14 +693,47 @@ class ServerModel with ChangeNotifier {
   }
 
   sendLoginResponse(Client client, bool res) async {
-    // 忽略res参数，始终接受连接
+    // 根据用户选择的res参数来响应连接请求
     final id = client.id;
-    await bind.cmLoginRes(connId: id, res: true);
+    
+    // 先更新UI状态，以提供即时反馈
+    if (res) {
+      // 如果接受连接，设置客户端为已授权状态
+      final index = _clients.indexWhere((element) => element.id == id);
+      if (index >= 0) {
+        _clients[index].authorized = true;
+        // 立即通知UI更新
+        notifyListeners();
+      }
+    }
+    
+    // 然后发送响应到服务端
+    await bind.cmLoginRes(connId: id, res: res);
+    
     if (client.isFileTransfer) {
       return;
     }
-    if (!isStart) {
+    
+    if (res && !isStart) {
       toggleService();
+    }
+    
+    // 关闭与此客户端相关的通知
+    parent.target?.invokeMethod("cancel_notification", id);
+    
+    // 延迟一段时间后再次刷新客户端状态，确保UI与实际状态同步
+    if (res) {
+      Future.delayed(Duration(milliseconds: 300), () {
+        // 再次检查并更新客户端状态
+        updateClientState();
+      });
+    }
+    
+    // 退出并重新进入应用以刷新UI状态
+    if (res && isMobile) {
+      Future.delayed(Duration(milliseconds: 200), () {
+        parent.target?.dialogManager.dismissAll();
+      });
     }
   }
 
@@ -901,6 +958,50 @@ class Client {
     } else {
       return ClientType.remote;
     }
+  }
+  
+  Client copyWith({
+    int? id,
+    bool? authorized,
+    bool? isFileTransfer,
+    String? portForward,
+    String? name,
+    String? peerId,
+    bool? keyboard,
+    bool? clipboard,
+    bool? audio,
+    bool? file,
+    bool? restart,
+    bool? recording,
+    bool? blockInput,
+    bool? disconnected,
+    bool? fromSwitch,
+    bool? inVoiceCall,
+    bool? incomingVoiceCall,
+  }) {
+    final newClient = Client(
+      id ?? this.id,
+      authorized ?? this.authorized,
+      isFileTransfer ?? this.isFileTransfer,
+      name ?? this.name,
+      peerId ?? this.peerId,
+      keyboard ?? this.keyboard,
+      clipboard ?? this.clipboard,
+      audio ?? this.audio,
+    );
+    
+    newClient.file = file ?? this.file;
+    newClient.restart = restart ?? this.restart;
+    newClient.recording = recording ?? this.recording;
+    newClient.blockInput = blockInput ?? this.blockInput;
+    newClient.disconnected = disconnected ?? this.disconnected;
+    newClient.fromSwitch = fromSwitch ?? this.fromSwitch;
+    newClient.inVoiceCall = inVoiceCall ?? this.inVoiceCall;
+    newClient.incomingVoiceCall = incomingVoiceCall ?? this.incomingVoiceCall;
+    newClient.portForward = portForward ?? this.portForward;
+    newClient.unreadChatMessageCount = this.unreadChatMessageCount;
+    
+    return newClient;
   }
 }
 
