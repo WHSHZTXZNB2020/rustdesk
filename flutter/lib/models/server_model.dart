@@ -544,13 +544,36 @@ class ServerModel with ChangeNotifier {
       
       // 如果有活跃连接，安排定期调用确保UI交互能力
       if (_clients.isNotEmpty && _clients.any((c) => !c.disconnected)) {
-        // 每3秒刷新一次UI交互能力，确保本地操作不受阻碍
-        Future.delayed(Duration(seconds: 3), () {
+        // 每秒钟刷新一次UI交互能力，确保本地操作不受阻碍
+        // 降低刷新频率，从3秒改为1秒
+        Future.delayed(Duration(seconds: 1), () {
           ensureLocalUiInteractive();
         });
+        
+        // 额外的监听处理 - 在操作RustDesk内部UI时更主动地确保交互能力
+        parent.target?.ffiModel.uiStateOverride = true;
+      } else {
+        // 如果没有活跃连接，则重置状态
+        parent.target?.ffiModel.uiStateOverride = false;
       }
     } catch (e) {
       debugPrint("Error ensuring UI interactive: $e");
+    }
+  }
+
+  // 每当我们检测到用户可能要操作RustDesk自身UI时调用
+  void notifyLocalUiActivity() {
+    if (!isAndroid) return;
+    
+    // 即使不处于远程控制状态，也尝试确保UI的可交互性
+    if (parent.target != null) {
+      debugPrint("检测到本地UI活动，确保UI交互");
+      parent.target?.invokeMethod("ensure_ui_interactive");
+      
+      // 连续两次调用，确保UI能可靠地接收事件
+      Future.delayed(Duration(milliseconds: 100), () {
+        parent.target?.invokeMethod("ensure_ui_interactive");
+      });
     }
   }
 
@@ -692,11 +715,9 @@ class ServerModel with ChangeNotifier {
     });
   }
 
-  sendLoginResponse(Client client, bool res) async {
-    // 根据用户选择的res参数来响应连接请求
+  Future<void> sendLoginResponse(Client client, bool res) async {
     final id = client.id;
     
-    // 先更新UI状态，以提供即时反馈
     if (res) {
       // 如果接受连接，设置客户端为已授权状态
       final index = _clients.indexWhere((element) => element.id == id);
@@ -706,6 +727,9 @@ class ServerModel with ChangeNotifier {
         notifyListeners();
       }
     }
+    
+    // 主动确保UI交互能力，不仅在接受连接后，而是对所有登录响应
+    notifyLocalUiActivity();
     
     // 然后发送响应到服务端
     await bind.cmLoginRes(connId: id, res: res);
@@ -720,6 +744,20 @@ class ServerModel with ChangeNotifier {
     
     // 关闭与此客户端相关的通知
     parent.target?.invokeMethod("cancel_notification", id);
+    
+    // 接受连接后，主动确保本地UI交互能力
+    if (res && isAndroid) {
+      debugPrint("接受连接后主动确保本地UI交互能力");
+      ensureLocalUiInteractive();
+      
+      // 多次延迟调用，确保UI状态稳定
+      // 100ms, 300ms, 800ms 各调用一次
+      for (var delay in [100, 300, 800]) {
+        Future.delayed(Duration(milliseconds: delay), () {
+          ensureLocalUiInteractive();
+        });
+      }
+    }
     
     // 延迟一段时间后再次刷新客户端状态，确保UI与实际状态同步
     if (res) {
