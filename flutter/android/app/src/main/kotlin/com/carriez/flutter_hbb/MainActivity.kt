@@ -41,6 +41,10 @@ class MainActivity : FlutterActivity() {
         private var _rdClipboardManager: RdClipboardManager? = null
         val rdClipboardManager: RdClipboardManager?
             get() = _rdClipboardManager;
+        
+        // 系统级权限常量字符串
+        const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
+        const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
     }
 
     private val channelTag = "mChannel"
@@ -78,8 +82,8 @@ class MainActivity : FlutterActivity() {
 
     // 检查系统级权限，替代MediaProjection请求
     private fun checkSystemPermissions(): Boolean {
-        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
-        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
         
         return captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
                readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
@@ -166,7 +170,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "init_service_without_permission" -> {
-                    Log.d(logTag, "直接请求MediaProjection权限，跳过应用内确认对话框")
+                    Log.d(logTag, "尝试在定制系统环境下启动服务")
                     try {
                         // 绑定服务
                         Intent(activity, MainService::class.java).also {
@@ -178,11 +182,23 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         
-                        // 直接请求MediaProjection权限，跳过所有应用内确认对话框
-                        requestMediaProjection()
-                        result.success(true)
+                        // 在定制系统中，检查系统级权限替代MediaProjection请求
+                        if (checkSystemPermissions()) {
+                            val intent = Intent(this, MainService::class.java).apply {
+                                action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(intent)
+                            } else {
+                                startService(intent)
+                            }
+                            result.success(true)
+                        } else {
+                            Log.e(logTag, "缺少系统级权限，无法启动服务")
+                            result.success(false)
+                        }
                     } catch (e: Exception) {
-                        Log.e(logTag, "请求MediaProjection权限失败: ${e.message}")
+                        Log.e(logTag, "启动服务失败: ${e.message}")
                         result.success(false)
                     }
                 }
