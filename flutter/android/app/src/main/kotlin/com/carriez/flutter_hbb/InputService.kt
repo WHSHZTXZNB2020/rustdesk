@@ -88,6 +88,11 @@ class InputService : Service {
     private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout().toLong()
 
     private var isWaitingLongPress = false
+    
+    // 追踪事件状态，避免重复注入
+    private var lastActionType = -1
+    private var lastEventTime = 0L
+    private var pendingEventRetry = false
 
     private var lastX = 0
     private var lastY = 0
@@ -96,6 +101,9 @@ class InputService : Service {
     private var inputManager: InputManager? = null
     private lateinit var appContext: Context
     private lateinit var handler: Handler
+    
+    // 事件处理状态
+    private var lastDownTime = 0L   // 上次DOWN事件的时间戳
     
     // 提供公开的无参构造函数
     constructor() : super() {
@@ -142,6 +150,9 @@ class InputService : Service {
         val x = max(0, _x)
         val y = max(0, _y)
 
+        // 添加事件日志，便于调试
+        Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
+
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
@@ -161,6 +172,13 @@ class InputService : Service {
 
         // left button down, was up
         if (mask == LEFT_DOWN) {
+            // 防止短时间内重复触发DOWN事件
+            if (lastActionType == MotionEvent.ACTION_DOWN && 
+                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
+                Log.d(logTag, "跳过重复的LEFT_DOWN事件")
+                return
+            }
+            
             isWaitingLongPress = true
             timer.schedule(object : TimerTask() {
                 override fun run() {
@@ -186,6 +204,13 @@ class InputService : Service {
 
         // left up, was down
         if (mask == LEFT_UP) {
+            // 防止短时间内重复触发UP事件
+            if (lastActionType == MotionEvent.ACTION_UP && 
+                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
+                Log.d(logTag, "跳过重复的LEFT_UP事件")
+                return
+            }
+            
             if (leftIsDown) {
                 leftIsDown = false
                 isWaitingLongPress = false
@@ -241,11 +266,18 @@ class InputService : Service {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, x: Int, y: Int) {
+        // 添加日志便于调试
+        Log.d(logTag, "接收到触摸输入事件: mask=$mask, x=$x, y=$y")
+        
+        // 记录当前系统时间，用于时间间隔计算
+        val currentTime = SystemClock.uptimeMillis()
+        
         when (mask) {
             TOUCH_SCALE_START -> {
                 // Handle pinch to zoom start
                 lastX = x
                 lastY = y
+                Log.d(logTag, "TOUCH_SCALE_START: 初始化缩放开始点")
             }
             TOUCH_SCALE -> {
                 // Handle pinch to zoom
@@ -258,6 +290,9 @@ class InputService : Service {
                     // Simulate pinch gesture
                     val downTime = SystemClock.uptimeMillis()
                     val eventTime = SystemClock.uptimeMillis()
+                    
+                    // 添加调试日志
+                    Log.d(logTag, "TOUCH_SCALE: 执行缩放, deltaX=$deltaX, deltaY=$deltaY")
                     
                     // This is a simplified implementation - in a real app you'd need to track multiple pointers
                     val properties = arrayOf(MotionEvent.PointerProperties(), MotionEvent.PointerProperties())
@@ -291,8 +326,19 @@ class InputService : Service {
             }
             TOUCH_SCALE_END -> {
                 // Handle pinch to zoom end
+                Log.d(logTag, "TOUCH_SCALE_END: 缩放手势结束")
             }
             TOUCH_PAN_START -> {
+                // 增强防重复触发逻辑
+                if (lastActionType == MotionEvent.ACTION_DOWN && 
+                    (currentTime - lastEventTime) < 200) {
+                    Log.d(logTag, "跳过重复的TOUCH_PAN_START事件，距上次: ${currentTime - lastEventTime}ms")
+                    return
+                }
+                
+                // 添加调试日志
+                Log.d(logTag, "TOUCH_PAN_START: 开始平移手势 at ($x, $y)")
+                
                 // Handle pan start
                 lastX = x
                 lastY = y
@@ -300,11 +346,28 @@ class InputService : Service {
             }
             TOUCH_PAN_UPDATE -> {
                 // Handle pan update
+                // 添加调试日志
+                if (lastX != 0 && lastY != 0) {
+                    val deltaX = x - lastX
+                    val deltaY = y - lastY
+                    Log.d(logTag, "TOUCH_PAN_UPDATE: 平移更新, 移动: ($deltaX, $deltaY)")
+                }
+                
                 injectMotionEvent(MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat())
                 lastX = x
                 lastY = y
             }
             TOUCH_PAN_END -> {
+                // 增强防重复触发逻辑
+                if (lastActionType == MotionEvent.ACTION_UP && 
+                    (currentTime - lastEventTime) < 200) {
+                    Log.d(logTag, "跳过重复的TOUCH_PAN_END事件，距上次: ${currentTime - lastEventTime}ms")
+                    return
+                }
+                
+                // 添加调试日志
+                Log.d(logTag, "TOUCH_PAN_END: 平移手势结束 at ($x, $y)")
+                
                 // Handle pan end
                 injectMotionEvent(MotionEvent.ACTION_UP, x.toFloat(), y.toFloat())
             }
@@ -396,17 +459,80 @@ class InputService : Service {
     
     private fun injectMotionEvent(action: Int, x: Float, y: Float, isLongPress: Boolean = false): Boolean {
         try {
-            val downTime = SystemClock.uptimeMillis()
-            val eventTime = SystemClock.uptimeMillis()
+            // 添加更多详细的日志信息
+            val actionName = when (action) {
+                MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
+                MotionEvent.ACTION_UP -> "ACTION_UP"
+                MotionEvent.ACTION_MOVE -> "ACTION_MOVE"
+                else -> "未知动作($action)"
+            }
             
+            Log.d(logTag, "注入动作事件: $actionName at ($x, $y), isLongPress=$isLongPress")
+            
+            // 检查事件防重复（相同类型的事件在短时间内只处理一次）
+            val now = SystemClock.uptimeMillis()
+            
+            // 对于ACTION_DOWN和ACTION_UP做更严格的检查，因为这些可能导致重复点击问题
+            if (!isLongPress && 
+                (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) && 
+                action == lastActionType && 
+                (now - lastEventTime) < 250) {
+                Log.d(logTag, "跳过重复的动作事件: $actionName, 距上次: ${now - lastEventTime}ms")
+                return true
+            }
+            
+            // 对于MOVE事件，我们允许更频繁的注入，但仍然防止过于频繁
+            if (action == MotionEvent.ACTION_MOVE && 
+                action == lastActionType && 
+                (now - lastEventTime) < 16) { // 约60fps
+                // 不记录日志，避免日志过多
+                return true
+            }
+            
+            lastActionType = action
+            lastEventTime = now
+            
+            val downTime = if (action == MotionEvent.ACTION_DOWN) now else lastDownTime
+            if (action == MotionEvent.ACTION_DOWN) {
+                lastDownTime = downTime
+            }
+            
+            val eventTime = now
+            
+            // 创建MotionEvent
             val event = MotionEvent.obtain(
                 downTime, eventTime, action, x, y, 0
             )
+            
             event.source = InputDevice.SOURCE_TOUCHSCREEN
             
+            // 注入事件
             val result = injectEvent(event)
             event.recycle()
+            
+            if (!result) {
+                Log.e(logTag, "注入动作事件失败: $actionName")
+                
+                // 如果是UP事件，我们需要确保它被发送，尝试再次发送
+                if (action == MotionEvent.ACTION_UP) {
+                    Log.d(logTag, "尝试再次发送UP事件")
+                    
+                    // 短暂延迟后再次尝试
+                    Thread.sleep(10)
+                    
+                    val retryEvent = MotionEvent.obtain(
+                        downTime, SystemClock.uptimeMillis(), action, x, y, 0
+                    )
+                    retryEvent.source = InputDevice.SOURCE_TOUCHSCREEN
+                    val retryResult = injectEvent(retryEvent)
+                    retryEvent.recycle()
+                    
+                    return retryResult
+                }
+            }
+            
             return result
+            
         } catch (e: Exception) {
             Log.e(logTag, "Error injecting motion event: ${e.message}")
             return false
