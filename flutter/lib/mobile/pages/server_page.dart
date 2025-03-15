@@ -168,9 +168,9 @@ class _ServerPageState extends State<ServerPage> {
     });
     gFFI.serverModel.checkAndroidPermission();
     
-    // 应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限
+    // 应用启动后立即请求系统级权限，不再需要MediaProjection权限
     Future.delayed(Duration(milliseconds: 100), () async {
-      debugPrint("应用启动后立即请求INJECT_EVENT权限，然后自动请求MediaProjection权限");
+      debugPrint("应用启动后立即请求系统级权限");
       
       // 先请求输入控制权限（预授权环境下应该直接成功）
       if (!gFFI.serverModel.inputOk) {
@@ -181,9 +181,9 @@ class _ServerPageState extends State<ServerPage> {
         await Future.delayed(Duration(milliseconds: 300));
       }
       
-      // 无论输入控制权限是否获取成功，都自动请求屏幕录制权限
+      // 自动启动服务
       if (!gFFI.serverModel.isStart) {
-        debugPrint("无论输入控制权限状态，都自动请求屏幕录制权限(MediaProjection)");
+        debugPrint("自动启动使用系统权限的屏幕捕获服务");
         await gFFI.serverModel.toggleService(isAuto: true);
       }
     });
@@ -255,7 +255,7 @@ class ServiceNotRunningNotification extends StatelessWidget {
                   // 直接启动服务，不显示警告弹窗
                   serverModel.toggleService();
                 },
-                label: Text(translate("开始协助")))
+                label: Text(translate("开始屏幕共享")))
           ],
         ));
   }
@@ -628,7 +628,9 @@ class PermissionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 如果是"输入控制"或"屏幕录制"且已启用，则禁用开关操作
-    if ((name == translate("Input Control") || name == translate("Screen Capture")) && isOk) {
+    if ((name == translate("Input Control") || 
+         name == translate("使用系统权限捕获屏幕") || 
+         name == translate("Screen Capture")) && isOk) {
       return SwitchListTile(
         visualDensity: VisualDensity.compact,
         contentPadding: EdgeInsets.all(0),
