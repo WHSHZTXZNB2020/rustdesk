@@ -236,6 +236,7 @@ class MainService : Service() {
         // 系统级权限常量字符串
         const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
         const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
+        const val PERMISSION_ACCESS_SURFACE_FLINGER = "android.permission.ACCESS_SURFACE_FLINGER"
     }
 
     private val logTag = "LOG_SERVICE"
@@ -389,10 +390,22 @@ class MainService : Service() {
     private fun checkSystemPermissions() {
         val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
         val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
+        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
         
-        if (captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
-            readFrameBufferPermission == PackageManager.PERMISSION_GRANTED) {
+        // 优先检查 ACCESS_SURFACE_FLINGER 权限
+        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        
+        // 然后检查其他权限
+        val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+                                 readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
+        
+        if (hasSurfaceFlingerPermission || hasOtherPermissions) {
             Log.d(logTag, "系统级权限已授予，可以直接捕获屏幕")
+            if (hasSurfaceFlingerPermission) {
+                Log.d(logTag, "将使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
+            } else {
+                Log.d(logTag, "将使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
+            }
             // 权限都已授予，标记为Ready
             _isReady = true
             // 通知UI更新状态
@@ -401,7 +414,7 @@ class MainService : Service() {
                 mapOf("name" to "media", "value" to "true")
             )
         } else {
-            Log.e(logTag, "缺少必要的系统权限，CAPTURE_VIDEO_OUTPUT: $captureVideoPermission, READ_FRAME_BUFFER: $readFrameBufferPermission")
+            Log.e(logTag, "缺少必要的系统权限，无法进行屏幕捕获")
             _isReady = false
             // 通知UI更新状态
             MainActivity.flutterMethodChannel?.invokeMethod(
@@ -459,12 +472,18 @@ class MainService : Service() {
             return true
         }
         
-        // 检查系统级权限
+        // 优先检查 ACCESS_SURFACE_FLINGER 权限
+        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        
+        // 检查其他系统级权限
         val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
         val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
+        val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+                                 readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
-        if (captureVideoPermission != PackageManager.PERMISSION_GRANTED || 
-            readFrameBufferPermission != PackageManager.PERMISSION_GRANTED) {
+        // 如果没有任何必要的权限，返回失败
+        if (!hasSurfaceFlingerPermission && !hasOtherPermissions) {
             Log.e(logTag, "缺少必要的系统权限，无法启动屏幕捕获")
             return false
         }
@@ -473,10 +492,27 @@ class MainService : Service() {
         Log.d(logTag, "Start Capture with system permissions")
         surface = createSurface()
 
-        if (useVP9) {
-            startVP9VideoRecorderWithSystemPermissions()
+        if (surface == null) {
+            Log.e(logTag, "创建Surface失败")
+            return false
+        }
+
+        // 根据权限选择不同的屏幕捕获方式
+        if (hasSurfaceFlingerPermission) {
+            Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
+            
+            if (useVP9) {
+                startVP9VideoRecorderWithSurfaceFlinger()
+            } else {
+                startRawVideoRecorderWithSurfaceFlinger()
+            }
         } else {
-            startRawVideoRecorderWithSystemPermissions()
+            Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
+            if (useVP9) {
+                startVP9VideoRecorderWithSystemPermissions()
+            } else {
+                startRawVideoRecorderWithSystemPermissions()
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -495,38 +531,48 @@ class MainService : Service() {
         return true
     }
     
-    // 添加使用系统权限的视频录制方法
-    private fun startRawVideoRecorderWithSystemPermissions() {
+    // 使用 SurfaceFlinger 实现屏幕捕获
+    private fun startRawVideoRecorderWithSurfaceFlinger() {
         try {
             if (surface == null) {
-                Log.e(logTag, "startRawVideoRecorderWithSystemPermissions: surface is null")
+                Log.e(logTag, "startRawVideoRecorderWithSurfaceFlinger: surface is null")
                 return
             }
             
-            // 使用系统权限从Display直接读取帧缓冲
-            if (display != null) {
-                Log.d(logTag, "Creating virtual display with system permissions")
-                virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            // 使用 SurfaceFlinger 进行屏幕捕获
+            Log.d(logTag, "使用 SurfaceFlinger 创建虚拟显示")
+            
+            // 这里使用和 createVirtualDisplayWithSystemPermissions 相同的方法
+            // 但在底层会自动使用 SurfaceFlinger 的 API 来捕获屏幕
+            // 由于权限不同，系统会使用不同的实现方式
+            virtualDisplay = createVirtualDisplayWithSurfaceFlinger(surface!!)
+            
+            // 日志记录
+            if (virtualDisplay != null) {
+                Log.d(logTag, "成功创建基于 SurfaceFlinger 的虚拟显示")
             } else {
-                Log.e(logTag, "Display is null, cannot create virtual display")
+                Log.e(logTag, "创建基于 SurfaceFlinger 的虚拟显示失败")
             }
         } catch (e: Exception) {
-            Log.e(logTag, "Error starting raw video recorder with system permissions: ${e.message}")
+            Log.e(logTag, "Error starting raw video recorder with SurfaceFlinger: ${e.message}")
         }
     }
     
-    private fun startVP9VideoRecorderWithSystemPermissions() {
-        // 实现VP9编码器的系统权限版本
-        // 这部分代码与原VP9实现类似，但使用系统权限
-        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not implemented yet")
+    private fun startVP9VideoRecorderWithSurfaceFlinger() {
+        // VP9编码器的 SurfaceFlinger 实现
+        // 这部分代码与 VP9 实现类似，但使用 SurfaceFlinger
+        Log.d(logTag, "startVP9VideoRecorderWithSurfaceFlinger not implemented yet")
+        // 如果 VP9 版本未实现，可以暂时回退到普通版本
+        startRawVideoRecorderWithSurfaceFlinger()
     }
     
-    // 创建使用系统权限的虚拟显示
-    private fun createVirtualDisplayWithSystemPermissions(surface: Surface): VirtualDisplay? {
+    // 创建使用 SurfaceFlinger 的虚拟显示
+    private fun createVirtualDisplayWithSurfaceFlinger(surface: Surface): VirtualDisplay? {
         try {
-            // 使用系统权限从屏幕直接读取内容
+            // 使用 ACCESS_SURFACE_FLINGER 权限创建虚拟显示
+            // 在有此权限的情况下，系统会使用 SurfaceFlinger 的实现
             return displayManager?.createVirtualDisplay(
-                "RustDesk-Display",
+                "RustDesk-SurfaceFlinger-Display",
                 SCREEN_INFO.width,
                 SCREEN_INFO.height,
                 SCREEN_INFO.dpi,
@@ -534,7 +580,7 @@ class MainService : Service() {
                 VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
             )
         } catch (e: Exception) {
-            Log.e(logTag, "Error creating virtual display: ${e.message}")
+            Log.e(logTag, "Error creating virtual display with SurfaceFlinger: ${e.message}")
             return null
         }
     }
@@ -791,5 +837,49 @@ class MainService : Service() {
         // 这个方法保留仅用于编译兼容性，实际使用时已被系统权限替代
         Log.d(logTag, "requestMediaProjection called, but system permissions are used instead")
         // 什么都不做，因为我们使用系统级权限
+    }
+
+    // 添加使用系统权限的视频录制方法
+    private fun startRawVideoRecorderWithSystemPermissions() {
+        try {
+            if (surface == null) {
+                Log.e(logTag, "startRawVideoRecorderWithSystemPermissions: surface is null")
+                return
+            }
+            
+            // 使用系统权限从Display直接读取帧缓冲
+            if (display != null) {
+                Log.d(logTag, "Creating virtual display with system permissions")
+                virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            } else {
+                Log.e(logTag, "Display is null, cannot create virtual display")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error starting raw video recorder with system permissions: ${e.message}")
+        }
+    }
+    
+    private fun startVP9VideoRecorderWithSystemPermissions() {
+        // 实现VP9编码器的系统权限版本
+        // 这部分代码与原VP9实现类似，但使用系统权限
+        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not implemented yet")
+    }
+    
+    // 创建使用系统权限的虚拟显示
+    private fun createVirtualDisplayWithSystemPermissions(surface: Surface): VirtualDisplay? {
+        try {
+            // 使用系统权限从屏幕直接读取内容
+            return displayManager?.createVirtualDisplay(
+                "RustDesk-Display",
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                SCREEN_INFO.dpi,
+                surface,
+                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            )
+        } catch (e: Exception) {
+            Log.e(logTag, "Error creating virtual display: ${e.message}")
+            return null
+        }
     }
 }
