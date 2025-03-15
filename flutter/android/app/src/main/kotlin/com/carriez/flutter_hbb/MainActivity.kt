@@ -2,7 +2,7 @@ package com.carriez.flutter_hbb
 
 /**
  * Handle events from flutter
- * Request MediaProjection permission
+ * Request system permissions for screen capturing
  *
  * Inspired by [droidVNC-NG] https://github.com/bk138/droidVNC-NG
  */
@@ -33,7 +33,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
-
+import android.content.pm.PackageManager
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -76,18 +76,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun requestMediaProjection() {
-        val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = ACT_REQUEST_MEDIA_PROJECTION
-        }
-        startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
+    // 检查系统级权限，替代MediaProjection请求
+    private fun checkSystemPermissions(): Boolean {
+        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        
+        return captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+               readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
     }
+    
+    // 移除不再需要的requestMediaProjection方法
+    // private fun requestMediaProjection() {
+    //     val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
+    //         action = ACT_REQUEST_MEDIA_PROJECTION
+    //     }
+    //     startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
+    // }
 
+    // 修改onActivityResult，移除MediaProjection相关处理
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION && resultCode == RES_FAILED) {
-            flutterMethodChannel?.invokeMethod("on_media_projection_canceled", null)
-        }
+        // 系统级权限不需要ActivityResult处理
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,6 +104,17 @@ class MainActivity : FlutterActivity() {
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
+        }
+        
+        // 应用启动时检查系统级权限状态并通知Flutter端
+        if (checkSystemPermissions()) {
+            Log.d(logTag, "系统级权限已预授权")
+            flutterMethodChannel?.invokeMethod(
+                "on_state_changed",
+                mapOf("name" to "media", "value" to "true")
+            )
+        } else {
+            Log.d(logTag, "系统级权限未授权")
         }
     }
 
@@ -119,20 +139,31 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // 修改initFlutterChannel方法中处理MediaProjection的部分
     private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {
-        flutterMethodChannel.setMethodCallHandler { call, result ->
-            // make sure result will be invoked, otherwise flutter will await forever
-            when (call.method) {
+        flutterMethodChannel.setMethodCallHandler { method, result ->
+            when (method.method) {
                 "init_service" -> {
-                    Intent(activity, MainService::class.java).also {
-                        bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
-                    }
                     if (MainService.isReady) {
                         result.success(false)
                         return@setMethodCallHandler
                     }
-                    requestMediaProjection()
-                    result.success(true)
+                    
+                    // 使用系统级权限直接启动服务，不再使用MediaProjection
+                    if (checkSystemPermissions()) {
+                        val intent = Intent(this, MainService::class.java).apply {
+                            action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } else {
+                        Log.e(logTag, "缺少必要的系统级权限，无法启动服务")
+                        result.success(false)
+                    }
                 }
                 "init_service_without_permission" -> {
                     Log.d(logTag, "直接请求MediaProjection权限，跳过应用内确认对话框")
@@ -172,23 +203,23 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "check_permission" -> {
-                    if (call.arguments is String) {
-                        result.success(XXPermissions.isGranted(context, call.arguments as String))
+                    if (method.arguments is String) {
+                        result.success(XXPermissions.isGranted(context, method.arguments as String))
                     } else {
                         result.success(false)
                     }
                 }
                 "request_permission" -> {
-                    if (call.arguments is String) {
-                        requestPermission(context, call.arguments as String)
+                    if (method.arguments is String) {
+                        requestPermission(context, method.arguments as String)
                         result.success(true)
                     } else {
                         result.success(false)
                     }
                 }
                 START_ACTION -> {
-                    if (call.arguments is String) {
-                        startAction(context, call.arguments as String)
+                    if (method.arguments is String) {
+                        startAction(context, method.arguments as String)
                         result.success(true)
                     } else {
                         result.success(false)
@@ -318,8 +349,8 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "cancel_notification" -> {
-                    if (call.arguments is Int) {
-                        val id = call.arguments as Int
+                    if (method.arguments is Int) {
+                        val id = method.arguments as Int
                         mainService?.cancelNotification(id)
                     } else {
                         result.success(true)
@@ -327,7 +358,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "enable_soft_keyboard" -> {
                     // https://blog.csdn.net/hanye2020/article/details/105553780
-                    if (call.arguments as Boolean) {
+                    if (method.arguments as Boolean) {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     } else {
                         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
@@ -344,10 +375,10 @@ class MainActivity : FlutterActivity() {
                     result.success(prefs.getBoolean(KEY_START_ON_BOOT_OPT, false))
                 }
                 SET_START_ON_BOOT_OPT -> {
-                    if (call.arguments is Boolean) {
+                    if (method.arguments is Boolean) {
                         val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
                         val edit = prefs.edit()
-                        edit.putBoolean(KEY_START_ON_BOOT_OPT, call.arguments as Boolean)
+                        edit.putBoolean(KEY_START_ON_BOOT_OPT, method.arguments as Boolean)
                         edit.apply()
                         result.success(true)
                     } else {
@@ -355,10 +386,10 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 SYNC_APP_DIR_CONFIG_PATH -> {
-                    if (call.arguments is String) {
+                    if (method.arguments is String) {
                         val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
                         val edit = prefs.edit()
-                        edit.putString(KEY_APP_DIR_CONFIG_PATH, call.arguments as String)
+                        edit.putString(KEY_APP_DIR_CONFIG_PATH, method.arguments as String)
                         edit.apply()
                         result.success(true)
                     } else {
@@ -366,8 +397,8 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 GET_VALUE -> {
-                    if (call.arguments is String) {
-                        if (call.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
+                    if (method.arguments is String) {
+                        if (method.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
                             result.success(isSupportVoiceCall())
                         } else {
                             result.error("-1", "No such key", null)
