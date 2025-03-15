@@ -45,6 +45,7 @@ class MainActivity : FlutterActivity() {
         // 系统级权限常量字符串
         const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
         const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
+        const val PERMISSION_ACCESS_SURFACE_FLINGER = "android.permission.ACCESS_SURFACE_FLINGER"
     }
 
     private val channelTag = "mChannel"
@@ -82,11 +83,18 @@ class MainActivity : FlutterActivity() {
 
     // 检查系统级权限，替代MediaProjection请求
     private fun checkSystemPermissions(): Boolean {
+        // 优先检查 ACCESS_SURFACE_FLINGER 权限
+        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        
+        // 然后检查其他权限
         val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
         val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
+        val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+                                readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
-        return captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
-               readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
+        // 返回结果，只要有一种方式能用就可以
+        return hasSurfaceFlingerPermission || hasOtherPermissions
     }
     
     // 移除不再需要的requestMediaProjection方法
@@ -113,6 +121,27 @@ class MainActivity : FlutterActivity() {
         // 应用启动时检查系统级权限状态并通知Flutter端
         if (checkSystemPermissions()) {
             Log.d(logTag, "系统级权限已预授权")
+            
+            // 检查是否有ACCESS_SURFACE_FLINGER权限
+            val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+            val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+            
+            if (hasSurfaceFlingerPermission) {
+                // 使用自定义Toast显示"已就绪"提示
+                try {
+                    ToastUtils.showReadyToast(this)
+                } catch (e: Exception) {
+                    // 如果自定义Toast失败，回退到标准Toast
+                    val toast = android.widget.Toast.makeText(
+                        this,
+                        "已就绪",
+                        android.widget.Toast.LENGTH_SHORT
+                    )
+                    toast.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+                    toast.show()
+                }
+            }
+            
             flutterMethodChannel?.invokeMethod(
                 "on_state_changed",
                 mapOf("name" to "media", "value" to "true")
