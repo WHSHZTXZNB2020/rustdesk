@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -145,7 +146,17 @@ class _RawTouchGestureDetectorRegionState
     }
     if (!handleTouch) {
       // Mobile, "Mouse mode"
-      await inputModel.tap(MouseButtons.left);
+      // 检查是否是移动设备控制安卓端的情况
+      bool isMobileToAndroid = isMobile && ffiModel.isPeerAndroid;
+      if (isMobileToAndroid) {
+        // 移动设备控制安卓时，仅在Mouse模式下才发送点击，Touch模式已经在onTapUp处理过了
+        if (!ffiModel.touchMode) {
+          await inputModel.tap(MouseButtons.left);
+        }
+      } else {
+        // 其他平台组合，保持原有行为
+        await inputModel.tap(MouseButtons.left);
+      }
     }
   }
 
@@ -171,8 +182,20 @@ class _RawTouchGestureDetectorRegionState
         !ffi.cursorModel.isInRemoteRect(_lastPosOfDoubleTapDown)) {
       return;
     }
-    await inputModel.tap(MouseButtons.left);
-    await inputModel.tap(MouseButtons.left);
+    
+    // 检查是否是移动设备控制安卓的情况
+    bool isMobileToAndroid = isMobile && ffiModel.isPeerAndroid;
+    if (isMobileToAndroid) {
+      // 移动设备控制安卓时，只发送一次点击，避免重复
+      if (!ffiModel.touchMode) { // 在Mouse模式下才处理
+        await inputModel.tap(MouseButtons.left);
+      }
+      // Touch模式下不发送额外点击，因为TouchMode已经在onTapUp处理过点击事件
+    } else {
+      // 其他平台组合，保持原有双击行为
+      await inputModel.tap(MouseButtons.left);
+      await inputModel.tap(MouseButtons.left);
+    }
   }
 
   onLongPressDown(LongPressDownDetails d) async {
