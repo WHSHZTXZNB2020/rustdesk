@@ -26,6 +26,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Color
@@ -52,15 +53,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.app.PendingIntent.FLAG_UPDATE_CURRENT
-import android.app.ServiceInfo
 import android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
-import android.view.accessibility.AccessibilityServiceInfo
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.content.res.Configuration.ORIENTATION_LANDSCAPE
+import android.accessibilityservice.AccessibilityServiceInfo
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
