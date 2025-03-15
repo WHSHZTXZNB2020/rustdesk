@@ -26,6 +26,12 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
     private var audioRecordStat = false
     private var audioThread: Thread? = null
     private var usesSystemPermissions = false
+    
+    // 系统级权限常量字符串
+    companion object {
+        const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
+        const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
+    }
 
     @RequiresApi(Build.VERSION_CODES.M)
     fun createAudioRecorder(inVoiceCall: Boolean, mediaProjection: MediaProjection?): Boolean {
@@ -42,8 +48,8 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
         }
 
         // 检查系统级权限
-        val captureVideoPermission = context.checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
-        val readFrameBufferPermission = context.checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        val captureVideoPermission = context.checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = context.checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
         usesSystemPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
                                 readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
