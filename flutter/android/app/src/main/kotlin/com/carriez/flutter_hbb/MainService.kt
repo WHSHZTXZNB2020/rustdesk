@@ -136,13 +136,13 @@ class MainService : Service() {
                     }
                     
                     // 立即自动授权连接
-                    if (!jsonObject["authorized"] as Boolean) {
+                    if (!(jsonObject["authorized"] as Boolean)) {
                         // 如果连接未授权，发送授权响应
                         val auth = JSONObject().apply {
                             put("id", id)
                             put("res", true)  // 始终返回true表示接受连接
                         }
-                        FFI.autorizeResponse(auth.toString())
+                        FFI.autorize(auth.toString())
                     }
                 } catch (e: JSONException) {
                     e.printStackTrace()
@@ -164,7 +164,7 @@ class MainService : Service() {
                                 put("res", true)  // 始终返回true表示接受语音通话
                                 put("is_voice_call", true)
                             }
-                            FFI.autorizeResponse(auth.toString())
+                            FFI.autorize(auth.toString())
                         } else {
                             if (!audioRecordHandle.switchOutVoiceCall(null)) {
                                 Log.e(logTag, "switchOutVoiceCall fail")
@@ -220,6 +220,10 @@ class MainService : Service() {
             get() = _isStart
         val isAudioStart: Boolean
             get() = _isAudioStart
+            
+        // 系统级权限常量字符串
+        const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
+        const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
     }
 
     private val logTag = "LOG_SERVICE"
@@ -368,8 +372,8 @@ class MainService : Service() {
     }
 
     private fun checkSystemPermissions() {
-        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
-        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
         
         if (captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
             readFrameBufferPermission == PackageManager.PERMISSION_GRANTED) {
@@ -441,8 +445,8 @@ class MainService : Service() {
         }
         
         // 检查系统级权限
-        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
-        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
         
         if (captureVideoPermission != PackageManager.PERMISSION_GRANTED || 
             readFrameBufferPermission != PackageManager.PERMISSION_GRANTED) {
