@@ -33,6 +33,21 @@ import hbb.MessageOuterClass.KeyEvent
 import hbb.MessageOuterClass.KeyboardMode
 import kotlin.concurrent.thread
 import java.lang.reflect.Method
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.accessibilityservice.GestureDescription.StrokeDescription
+import android.annotation.SuppressLint
+import android.graphics.PixelFormat
+import android.view.Gravity
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
+import android.widget.ImageView
+import androidx.core.view.isVisible
+import io.flutter.plugin.common.MethodChannel
+import java.lang.reflect.InvocationTargetException
+import java.util.Locale
+import kotlin.math.roundToInt
 
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
@@ -67,8 +82,27 @@ private val LEGACY_MODE = KeyboardMode.Legacy.number
 private val TRANSLATE_MODE = KeyboardMode.Translate.number
 private val MAP_MODE = KeyboardMode.Map.number
 
+// 添加重试队列
+data class RetryEvent(
+    val downTime: Long,
+    val eventTime: Long,
+    val action: Int,
+    val x: Float,
+    val y: Float,
+    val retryCount: Int,
+    val lastEventTime: Long = 0, // 上次尝试注入的时间
+    val isSystemArea: Boolean = false // 是否是系统区域
+)
+
+// 修改TouchArea类，添加时间戳
+data class TouchArea(
+    val x: Float,
+    val y: Float,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 // InputService类用于处理输入事件
-class InputService : Service {
+class InputService : AccessibilityService() {
 
     companion object {
         var ctx: InputService? = null
@@ -92,7 +126,16 @@ class InputService : Service {
     // 追踪事件状态，避免重复注入
     private var lastActionType = -1
     private var lastEventTime = 0L
-    private var pendingEventRetry = false
+    private var pendingEventRetry: RetryEvent? = null
+    private var isWaitingRetry = false
+    private var eventInProcessing = false
+    
+    // 特殊区域定义 - 屏幕底部的系统按钮区域
+    private val isSystemAreaEvent: (Float) -> Boolean = { y ->
+        val screenHeight = SCREEN_INFO.height
+        val systemAreaHeight = 100 // 预估的系统导航栏高度
+        y > (screenHeight - systemAreaHeight)
+    }
 
     private var lastX = 0
     private var lastY = 0
@@ -111,9 +154,17 @@ class InputService : Service {
     private var savedLastEventTime = 0L
     
     // 记录已点击过的区域，避免重复点击导致卡住
-    private data class TouchArea(val x: Int, val y: Int, val radius: Int)
     private val recentlyTouchedAreas = mutableListOf<TouchArea>()
     private var lastTouchCleanTime = 0L
+    
+    private lateinit var mWindowManager: WindowManager
+    private var imageView: ImageView? = null
+    private var rootView: FrameLayout? = null
+
+    private var pendingDoubleChecker: Handler? = null
+    private var pendingRequestFocus: Handler? = null
+    private var pendingCheck: Runnable? = null
+    private var pendingFocus: Runnable? = null
     
     // 提供公开的无参构造函数
     constructor() : super() {
@@ -194,20 +245,23 @@ class InputService : Service {
     }
 
     // 检查当前触摸位置是否在最近点击过的区域内
-    private fun isTouchInRecentArea(x: Int, y: Int): Boolean {
+    private fun isTouchInRecentArea(x: Float, y: Float): Boolean {
         // 定期清理超过2秒的区域记录
         val now = SystemClock.uptimeMillis()
         if (now - lastTouchCleanTime > 2000) {
-            recentlyTouchedAreas.clear()
+            val expiredTime = now - 2000
+            recentlyTouchedAreas.removeAll { it.timestamp < expiredTime }
             lastTouchCleanTime = now
-            return false
+            if (recentlyTouchedAreas.isEmpty()) {
+                return false
+            }
         }
         
         // 检查是否在任何已记录区域内
         for (area in recentlyTouchedAreas) {
             val distance = Math.sqrt(Math.pow((x - area.x).toDouble(), 2.0) + 
                                     Math.pow((y - area.y).toDouble(), 2.0))
-            if (distance < area.radius) {
+            if (distance < 60) {
                 Log.d(logTag, "触摸点在最近点击过的区域内: ($x,$y) 在区域 (${area.x},${area.y})")
                 return true
             }
@@ -216,10 +270,10 @@ class InputService : Service {
     }
     
     // 添加当前触摸位置到记录列表
-    private fun addTouchArea(x: Int, y: Int) {
+    private fun addTouchArea(x: Float, y: Float) {
         // 使用适当的半径（像素），根据设备DPI可能需要调整
-        val touchRadius = 60
-        recentlyTouchedAreas.add(TouchArea(x, y, touchRadius))
+        // 为系统按钮区域使用更大的半径
+        recentlyTouchedAreas.add(TouchArea(x, y, SystemClock.uptimeMillis()))
         
         // 最多保留10个区域记录
         if (recentlyTouchedAreas.size > 10) {
@@ -228,142 +282,150 @@ class InputService : Service {
     }
 
     @RequiresApi(Build.VERSION_CODES.N)
-    fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        // 当输入服务处于暂停状态时不处理任何事件
-        if (isPaused) {
-            Log.d(logTag, "输入服务暂停中，跳过鼠标输入事件")
-            return
-        }
+    fun onMouseInput(event: Map<String, Any?>, result: MethodChannel.Result) {
+        // 添加日志记录收到的鼠标输入事件
+        Log.d(logTag, "收到鼠标输入事件: $event")
         
-        val x = max(0, _x)
-        val y = max(0, _y)
-
-        // 添加事件日志，便于调试
-        Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
-        
-        // 检查是否在最近点击过的区域，如果是则自动暂停处理
-        if ((mask == LEFT_DOWN || mask == LEFT_UP) && isTouchInRecentArea(x, y)) {
-            Log.d(logTag, "点击在最近交互过的区域，自动暂停事件处理")
-            temporarilyResetState()
+        try {
+            val action = (event["type"] as Number?)?.toInt() ?: return result.success(false)
+            val mask = (event["mask"] as Number?)?.toInt() ?: 0
+            val x = (event["x"] as Number?)?.toFloat()?.roundToInt() ?: 0
+            val y = (event["y"] as Number?)?.toFloat()?.roundToInt() ?: 0
+            val button = event["button"] as? String ?: ""
             
-            // 300毫秒后恢复，给应用UI足够的处理时间
-            handler.postDelayed({
-                restoreState()
-            }, 300)
-            return
-        }
-
-        if (mask == 0 || mask == LEFT_MOVE) {
-            val oldX = mouseX
-            val oldY = mouseY
-            mouseX = x * SCREEN_INFO.scale
-            mouseY = y * SCREEN_INFO.scale
-            if (isWaitingLongPress) {
-                val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
-                if (delta > 8) {
-                    isWaitingLongPress = false
+            // 增加对LEFT_DOWN和LEFT_UP的去重逻辑
+            if (action == MouseEvent.ACTION_LEFT_DOWN.ordinal || action == MouseEvent.ACTION_LEFT_UP.ordinal) {
+                val now = System.currentTimeMillis()
+                // 对于DOWN和UP事件，检查是否在100ms内有相同类型的事件
+                if (lastActionType == action && now - lastEventTime < 100) {
+                    Log.d(logTag, "跳过重复的鼠标事件 - 类型: $action, 上次时间差: ${now - lastEventTime}ms")
+                    result.success(true)
+                    return
                 }
+                
+                // 更新最后的动作类型和时间
+                lastActionType = action
+                lastEventTime = now
             }
             
-            // Move mouse pointer
-            injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
-        }
-
-        // left button down, was up
-        if (mask == LEFT_DOWN) {
-            // 防止短时间内重复触发DOWN事件
-            if (lastActionType == MotionEvent.ACTION_DOWN && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
-                Log.d(logTag, "跳过重复的LEFT_DOWN事件")
-                return
-            }
-            
-            // 记录触摸区域
-            addTouchArea(x * SCREEN_INFO.scale, y * SCREEN_INFO.scale)
-            
-            isWaitingLongPress = true
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    if (isWaitingLongPress) {
-                        isWaitingLongPress = false
-                        // Long press
-                        injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat(), true)
+            // 根据动作类型执行不同操作
+            when (action) {
+                MouseEvent.ACTION_MOVE.ordinal -> {
+                    Log.d(logTag, "移动鼠标到 x: $x, y: $y")
+                    if (mask == 0) {
+                        simulateMove(x, y)
+                    } else {
+                        simulateDrag(x, y)
+                    }
+                    result.success(true)
+                }
+                MouseEvent.ACTION_DOWN.ordinal -> {
+                    Log.d(logTag, "鼠标按下 x: $x, y: $y, 按钮: $button")
+                    when (button) {
+                        "left" -> {
+                            simulateClick(x, y, false)
+                            result.success(true)
+                        }
+                        "right" -> {
+                            simulateClick(x, y, true)
+                            result.success(true)
+                        }
+                        else -> {
+                            result.success(false)
+                        }
                     }
                 }
-            }, longPressDuration)
-
-            leftIsDown = true
-            // Touch down
-            injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat())
-            return
-        }
-
-        // left down, was down
-        if (leftIsDown) {
-            // Continue touch/drag
-            injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
-        }
-
-        // left up, was down
-        if (mask == LEFT_UP) {
-            // 防止短时间内重复触发UP事件
-            if (lastActionType == MotionEvent.ACTION_UP && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
-                Log.d(logTag, "跳过重复的LEFT_UP事件")
-                return
-            }
-            
-            if (leftIsDown) {
-                leftIsDown = false
-                isWaitingLongPress = false
-                // Touch up
-                injectMotionEvent(MotionEvent.ACTION_UP, mouseX.toFloat(), mouseY.toFloat())
-                return
-            }
-        }
-
-        if (mask == RIGHT_UP) {
-            // Right click - simulate long press
-            injectLongPress(mouseX.toFloat(), mouseY.toFloat())
-            return
-        }
-
-        if (mask == BACK_UP) {
-            // Back button
-            injectKeyEvent(KeyEventAndroid.KEYCODE_BACK)
-            return
-        }
-
-        // wheel button actions
-        if (mask == WHEEL_BUTTON_DOWN) {
-            timer.purge()
-            recentActionTask = object : TimerTask() {
-                override fun run() {
-                    // Recent apps
-                    injectKeyEvent(KeyEventAndroid.KEYCODE_APP_SWITCH)
-                    recentActionTask = null
+                
+                MouseEvent.ACTION_LEFT_DOWN.ordinal -> {
+                    Log.d(logTag, "左键按下 x: $x, y: $y")
+                    
+                    // 检查是否是系统区域或应用图标区域
+                    val isSystemArea = isSystemAreaEvent(y.toFloat())
+                    val isAppIconArea = isSystemAreaEvent(y.toFloat())
+                    
+                    if (isSystemArea) {
+                        Log.d(logTag, "系统区域左键按下，延迟处理")
+                        // 对于系统区域的点击，我们直接处理UP事件，延迟DOWN事件
+                        result.success(true)
+                        return
+                    }
+                    
+                    if (isAppIconArea) {
+                        Log.d(logTag, "应用图标区域左键按下")
+                        // 对于应用图标区域，确保完整发送点击
+                        val injectResult = injectMotionEvent(
+                            mapOf(
+                                "action" to MotionEvent.ACTION_DOWN,
+                                "x" to x.toFloat(),
+                                "y" to y.toFloat(),
+                                "downTime" to System.currentTimeMillis(),
+                                "eventTime" to System.currentTimeMillis()
+                            )
+                        )
+                        result.success(injectResult)
+                        return
+                    }
+                    
+                    mouseLeftDown(x, y)
+                    result.success(true)
+                }
+                
+                MouseEvent.ACTION_LEFT_UP.ordinal -> {
+                    Log.d(logTag, "左键抬起 x: $x, y: $y")
+                    
+                    // 检查是否是系统区域或应用图标区域
+                    val isSystemArea = isSystemAreaEvent(y.toFloat())
+                    val isAppIconArea = isSystemAreaEvent(y.toFloat())
+                    
+                    if (isSystemArea) {
+                        Log.d(logTag, "系统区域左键抬起，使用dispatchClick")
+                        // 对于系统区域的点击，直接使用dispatchClick处理
+                        val success = dispatchClick(x.toFloat(), y.toFloat())
+                        result.success(success)
+                        return
+                    }
+                    
+                    if (isAppIconArea) {
+                        Log.d(logTag, "应用图标区域左键抬起")
+                        // 对于应用图标区域，确保完整发送点击
+                        val injectResult = injectMotionEvent(
+                            mapOf(
+                                "action" to MotionEvent.ACTION_UP,
+                                "x" to x.toFloat(),
+                                "y" to y.toFloat(),
+                                "downTime" to lastEventTime,
+                                "eventTime" to System.currentTimeMillis()
+                            )
+                        )
+                        result.success(injectResult)
+                        return
+                    }
+                    
+                    mouseLeftUp()
+                    result.success(true)
+                }
+                
+                MouseEvent.ACTION_WHEEL.ordinal -> {
+                    val value = (event["value"] as Number?)?.toFloat() ?: 0f
+                    Log.d(logTag, "滚轮事件 值: $value")
+                    mouseWheel(value)
+                    result.success(true)
+                }
+                
+                MouseEvent.ACTION_LONG_TAP.ordinal -> {
+                    Log.d(logTag, "长按事件 x: $x, y: $y")
+                    // 对于长按，我们确保使用直接点击而不是合成事件
+                    dispatchClick(x.toFloat(), y.toFloat())
+                    result.success(true)
+                }
+                
+                else -> {
+                    result.success(false)
                 }
             }
-            timer.schedule(recentActionTask, LONG_TAP_DELAY)
-        }
-
-        if (mask == WHEEL_BUTTON_UP) {
-            if (recentActionTask != null) {
-                recentActionTask!!.cancel()
-                // Home button
-                injectKeyEvent(KeyEventAndroid.KEYCODE_HOME)
-            }
-            return
-        }
-
-        // Scroll actions
-        if (mask == WHEEL_DOWN) {
-            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, -WHEEL_STEP.toFloat())
-        }
-
-        if (mask == WHEEL_UP) {
-            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, WHEEL_STEP.toFloat())
+        } catch (e: Exception) {
+            Log.e(logTag, "处理鼠标输入异常", e)
+            result.success(false)
         }
     }
 
@@ -379,7 +441,7 @@ class InputService : Service {
         Log.d(logTag, "接收到触摸输入事件: mask=$mask, x=$x, y=$y")
         
         // 检查是否在最近点击过的区域，如果是TOUCH_PAN_START则自动暂停
-        if (mask == TOUCH_PAN_START && isTouchInRecentArea(x, y)) {
+        if (mask == TOUCH_PAN_START && isTouchInRecentArea(x.toFloat(), y.toFloat())) {
             Log.d(logTag, "触摸在最近交互过的区域，自动暂停事件处理")
             temporarilyResetState()
             
@@ -458,7 +520,7 @@ class InputService : Service {
                 }
                 
                 // 记录触摸区域
-                addTouchArea(x, y)
+                addTouchArea(x.toFloat(), y.toFloat())
                 
                 // 添加调试日志
                 Log.d(logTag, "TOUCH_PAN_START: 开始平移手势 at ($x, $y)")
@@ -836,5 +898,124 @@ class InputService : Service {
         } catch (e: Exception) {
             Log.e(logTag, "Error in disableSelf: ${e.message}")
         }
+    }
+
+    private fun dispatchClick(x: Float, y: Float): Boolean {
+        Log.d(logTag, "Dispatch click - x: $x, y: $y")
+        // 检查是否有最近的类似位置的点击
+        val currentTime = System.currentTimeMillis()
+        val nearbyClicks = recentlyTouchedAreas.filter { 
+            val xDiff = Math.abs(it.x - x)
+            val yDiff = Math.abs(it.y - y)
+            val timeDiff = currentTime - it.timestamp
+            
+            // 检查时间和距离，特别是系统区域的点击需要更严格的检查
+            val isNearby = xDiff < 20 && yDiff < 20 && timeDiff < 500
+            isNearby
+        }
+        
+        // 如果有最近的类似点击，跳过
+        if (nearbyClicks.isNotEmpty()) {
+            Log.d(logTag, "跳过重复点击 - 最近已有类似位置的点击")
+            return false
+        }
+        
+        // 记录当前点击
+        addTouchArea(x, y)
+        // 清理超过1秒的记录
+        val expiredTime = currentTime - 1000
+        recentlyTouchedAreas.removeIf { it.timestamp < expiredTime }
+        
+        // 判断是否是系统区域事件
+        val isSystemArea = isSystemAreaEvent(y.toFloat())
+        val isAppIconArea = isSystemAreaEvent(y.toFloat())
+        
+        // 针对系统区域的点击，使用更大的触摸半径
+        val touchRadius = if (isSystemArea) 10f else 5f
+        
+        if (pendingCheck != null && pendingDoubleChecker != null) {
+            pendingDoubleChecker!!.removeCallbacks(pendingCheck!!)
+            pendingCheck = null
+        }
+        
+        // 创建手势路径
+        val clickPath = Path()
+        clickPath.moveTo(x, y)
+        
+        // 创建手势描述
+        val gestureBuilder = GestureDescription.Builder()
+        val gestureStroke = StrokeDescription(
+            clickPath,
+            0,
+            if (isSystemArea) 50 else 10,
+            isSystemArea
+        )
+        gestureBuilder.addStroke(gestureStroke)
+        
+        // 执行手势
+        Log.d(logTag, "执行点击手势 - x: $x, y: $y, 系统区域: $isSystemArea, 应用图标区域: $isAppIconArea")
+        return dispatchGesture(
+            gestureBuilder.build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    super.onCompleted(gestureDescription)
+                    Log.d(logTag, "点击手势完成")
+                }
+                
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    super.onCancelled(gestureDescription)
+                    Log.d(logTag, "点击手势被取消")
+                }
+            },
+            null
+        )
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun dispatchSwipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        duration: Long
+    ): Boolean {
+        val swipePath = Path()
+        swipePath.moveTo(x1, y1)
+        swipePath.lineTo(x2, y2)
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(StrokeDescription(swipePath, 0, duration))
+        return dispatchGesture(gestureBuilder.build(), null, null)
+    }
+
+    override fun onServiceConnected() {
+        Log.d(logTag, "onServiceConnected")
+        super.onServiceConnected()
+        mWindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        rootView = FrameLayout(this)
+        imageView = ImageView(this)
+        imageView?.layoutParams = FrameLayout.LayoutParams(300, 300, Gravity.CENTER)
+
+        rootView?.addView(imageView)
+        val layoutParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_PHONE else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        )
+        mWindowManager.addView(rootView, layoutParams)
+        showFloatBall(false)
+        if (pendingDoubleChecker == null) {
+            pendingDoubleChecker = Handler(Looper.getMainLooper())
+        }
+        if (pendingRequestFocus == null) {
+            pendingRequestFocus = Handler(Looper.getMainLooper())
+        }
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    }
+
+    override fun onInterrupt() {
     }
 }
