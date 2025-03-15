@@ -582,7 +582,21 @@ class InputService : Service {
     // 注入事件的辅助方法
     private fun injectEvent(event: InputEvent): Boolean {
         try {
-            return inputManager?.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC) ?: false
+            // 使用反射调用InputManager.injectInputEvent方法
+            inputManager?.let { manager ->
+                try {
+                    val injectInputEventMethod = manager.javaClass.getMethod(
+                        "injectInputEvent", 
+                        InputEvent::class.java,
+                        Int::class.java
+                    )
+                    return injectInputEventMethod.invoke(manager, event, INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean
+                } catch (e: Exception) {
+                    Log.e(logTag, "反射调用injectInputEvent失败: ${e.message}")
+                    return false
+                }
+            }
+            return false
         } catch (e: Exception) {
             Log.e(logTag, "Error injecting event: ${e.message}")
             return false
