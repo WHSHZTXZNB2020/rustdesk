@@ -697,7 +697,7 @@ class ConnectionManager extends StatelessWidget {
                         ).marginOnly(bottom: 5),
                   client.authorized
                       ? _buildDisconnectButton(client)
-                      : _buildNewConnectionHint(serverModel, client),
+                      : _buildNewConnectionHint(context, serverModel, client),
                   if (client.incomingVoiceCall && !client.inVoiceCall)
                     ..._buildNewVoiceCallHint(context, serverModel, client),
                 ])))
@@ -744,7 +744,12 @@ class ConnectionManager extends StatelessWidget {
     }
   }
 
-  Widget _buildNewConnectionHint(ServerModel serverModel, Client client) {
+  Widget _buildNewConnectionHint(BuildContext context, ServerModel serverModel, Client client) {
+    // 如果客户端已经授权，直接显示断开连接按钮，避免状态不一致
+    if (client.authorized) {
+      return _buildDisconnectButton(client);
+    }
+    
     return Row(mainAxisAlignment: MainAxisAlignment.end, children: [
       TextButton(
           child: Text(translate("Dismiss")),
@@ -756,7 +761,12 @@ class ConnectionManager extends StatelessWidget {
             icon: const Icon(Icons.check),
             label: Text(translate("Accept")),
             onPressed: () {
+              // 先本地更新UI状态，以提供即时反馈
+              client.authorized = true;
+              // 向服务器发送连接响应
               serverModel.sendLoginResponse(client, true);
+              // 强制刷新UI
+              (context as Element).markNeedsBuild();
             }),
     ]);
   }
