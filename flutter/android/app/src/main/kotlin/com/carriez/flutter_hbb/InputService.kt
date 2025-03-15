@@ -105,6 +105,16 @@ class InputService : Service {
     // 事件处理状态
     private var lastDownTime = 0L   // 上次DOWN事件的时间戳
     
+    // 添加临时暂停处理的变量
+    private var isPaused = false
+    private var savedLastActionType = -1
+    private var savedLastEventTime = 0L
+    
+    // 记录已点击过的区域，避免重复点击导致卡住
+    private data class TouchArea(val x: Int, val y: Int, val radius: Int)
+    private val recentlyTouchedAreas = mutableListOf<TouchArea>()
+    private var lastTouchCleanTime = 0L
+    
     // 提供公开的无参构造函数
     constructor() : super() {
         Log.d(logTag, "InputService created with default constructor")
@@ -145,13 +155,103 @@ class InputService : Service {
         disableSelf()
     }
 
+    // 临时暂停输入事件处理，让应用自身的UI能够响应
+    fun temporarilyResetState() {
+        Log.d(logTag, "临时暂停输入事件处理")
+        savedLastActionType = lastActionType
+        savedLastEventTime = lastEventTime
+        
+        // 清除已点击区域记录
+        recentlyTouchedAreas.clear()
+        lastTouchCleanTime = SystemClock.uptimeMillis()
+        
+        // 将lastActionType设置为一个特殊值，表示暂停状态
+        isPaused = true
+        lastActionType = -999
+        lastEventTime = 0L
+        
+        // 重置按键状态
+        leftIsDown = false
+        isWaitingLongPress = false
+    }
+    
+    // 恢复输入事件处理
+    fun restoreState() {
+        if (!isPaused) return
+        
+        Log.d(logTag, "恢复输入事件处理")
+        lastActionType = savedLastActionType
+        lastEventTime = savedLastEventTime
+        isPaused = false
+        
+        // 确保所有按键都释放
+        if (lastActionType == MotionEvent.ACTION_DOWN) {
+            // 如果之前是按下状态，强制发送一个UP事件
+            handler.post {
+                injectMotionEvent(MotionEvent.ACTION_UP, mouseX.toFloat(), mouseY.toFloat())
+            }
+        }
+    }
+
+    // 检查当前触摸位置是否在最近点击过的区域内
+    private fun isTouchInRecentArea(x: Int, y: Int): Boolean {
+        // 定期清理超过2秒的区域记录
+        val now = SystemClock.uptimeMillis()
+        if (now - lastTouchCleanTime > 2000) {
+            recentlyTouchedAreas.clear()
+            lastTouchCleanTime = now
+            return false
+        }
+        
+        // 检查是否在任何已记录区域内
+        for (area in recentlyTouchedAreas) {
+            val distance = Math.sqrt(Math.pow((x - area.x).toDouble(), 2.0) + 
+                                    Math.pow((y - area.y).toDouble(), 2.0))
+            if (distance < area.radius) {
+                Log.d(logTag, "触摸点在最近点击过的区域内: ($x,$y) 在区域 (${area.x},${area.y})")
+                return true
+            }
+        }
+        return false
+    }
+    
+    // 添加当前触摸位置到记录列表
+    private fun addTouchArea(x: Int, y: Int) {
+        // 使用适当的半径（像素），根据设备DPI可能需要调整
+        val touchRadius = 60
+        recentlyTouchedAreas.add(TouchArea(x, y, touchRadius))
+        
+        // 最多保留10个区域记录
+        if (recentlyTouchedAreas.size > 10) {
+            recentlyTouchedAreas.removeAt(0)
+        }
+    }
+
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
+        // 当输入服务处于暂停状态时不处理任何事件
+        if (isPaused) {
+            Log.d(logTag, "输入服务暂停中，跳过鼠标输入事件")
+            return
+        }
+        
         val x = max(0, _x)
         val y = max(0, _y)
 
         // 添加事件日志，便于调试
         Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
+        
+        // 检查是否在最近点击过的区域，如果是则自动暂停处理
+        if ((mask == LEFT_DOWN || mask == LEFT_UP) && isTouchInRecentArea(x, y)) {
+            Log.d(logTag, "点击在最近交互过的区域，自动暂停事件处理")
+            temporarilyResetState()
+            
+            // 300毫秒后恢复，给应用UI足够的处理时间
+            handler.postDelayed({
+                restoreState()
+            }, 300)
+            return
+        }
 
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
@@ -178,6 +278,9 @@ class InputService : Service {
                 Log.d(logTag, "跳过重复的LEFT_DOWN事件")
                 return
             }
+            
+            // 记录触摸区域
+            addTouchArea(x * SCREEN_INFO.scale, y * SCREEN_INFO.scale)
             
             isWaitingLongPress = true
             timer.schedule(object : TimerTask() {
@@ -266,8 +369,26 @@ class InputService : Service {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, x: Int, y: Int) {
+        // 当输入服务处于暂停状态时不处理任何事件
+        if (isPaused) {
+            Log.d(logTag, "输入服务暂停中，跳过触摸输入事件")
+            return
+        }
+        
         // 添加日志便于调试
         Log.d(logTag, "接收到触摸输入事件: mask=$mask, x=$x, y=$y")
+        
+        // 检查是否在最近点击过的区域，如果是TOUCH_PAN_START则自动暂停
+        if (mask == TOUCH_PAN_START && isTouchInRecentArea(x, y)) {
+            Log.d(logTag, "触摸在最近交互过的区域，自动暂停事件处理")
+            temporarilyResetState()
+            
+            // 300毫秒后恢复，给应用UI足够的处理时间
+            handler.postDelayed({
+                restoreState()
+            }, 300)
+            return
+        }
         
         // 记录当前系统时间，用于时间间隔计算
         val currentTime = SystemClock.uptimeMillis()
@@ -336,6 +457,9 @@ class InputService : Service {
                     return
                 }
                 
+                // 记录触摸区域
+                addTouchArea(x, y)
+                
                 // 添加调试日志
                 Log.d(logTag, "TOUCH_PAN_START: 开始平移手势 at ($x, $y)")
                 
@@ -375,6 +499,12 @@ class InputService : Service {
     }
 
     fun onKeyEvent(input: ByteArray) {
+        // 当输入服务处于暂停状态时不处理任何事件
+        if (isPaused) {
+            Log.d(logTag, "输入服务暂停中，跳过键盘输入事件")
+            return
+        }
+        
         try {
             val keyEvent = KeyEvent.parseFrom(input)
             
