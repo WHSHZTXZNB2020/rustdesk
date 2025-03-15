@@ -2370,9 +2370,49 @@ pub mod server_side {
             *config::APP_DIR.write().unwrap() = app_dir.into();
         }
         if let Ok(custom_client_config) = env.get_string(&custom_client_config) {
-            if !custom_client_config.is_empty() {
-                let custom_client_config: String = custom_client_config.into();
-                crate::read_custom_client(&custom_client_config);
+            let custom_client_config_str: String = custom_client_config.into();
+            if custom_client_config_str == "connection_response" {
+                // 处理连接授权响应
+                if let Ok(app_dir) = env.get_string(&app_dir) {
+                    let auth_json: String = app_dir.into();
+                    log::debug!("Processing connection_response: {}", auth_json);
+                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
+                        if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                            if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                                if res {
+                                    // 授权连接
+                                    let id = id as i32;
+                                    crate::ui_cm_interface::authorize(id);
+                                    log::debug!("Authorized connection {}", id);
+                                } else {
+                                    // 拒绝连接
+                                    let id = id as i32;
+                                    crate::ui_cm_interface::close(id);
+                                    log::debug!("Closed connection {}", id);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if custom_client_config_str == "voice_call_response" {
+                // 处理语音通话响应
+                if let Ok(app_dir) = env.get_string(&app_dir) {
+                    let auth_json: String = app_dir.into();
+                    log::debug!("Processing voice_call_response: {}", auth_json);
+                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
+                        if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                            if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                                let id = id as i32;
+                                // 处理语音通话响应
+                                crate::ui_cm_interface::cm_handle_incoming_voice_call(id, res);
+                                log::debug!("Processed voice call response for {}: {}", id, res);
+                            }
+                        }
+                    }
+                }
+            } else if !custom_client_config_str.is_empty() {
+                // 原有的逻辑
+                crate::read_custom_client(&custom_client_config_str);
             }
         }
         std::thread::spawn(move || start_server(true));
