@@ -137,7 +137,7 @@ class MainActivity : FlutterActivity() {
                         "已就绪",
                         android.widget.Toast.LENGTH_SHORT
                     )
-                    toast.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+                    toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
                     toast.show()
                 }
             }
