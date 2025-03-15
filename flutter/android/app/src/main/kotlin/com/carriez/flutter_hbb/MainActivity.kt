@@ -34,6 +34,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
+import android.view.MotionEvent
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -587,15 +590,64 @@ class MainActivity : FlutterActivity() {
                     if (isAppForeground) {
                         Log.d(logTag, "应用在前台，临时调整输入事件处理模式")
                         
-                        // 允许RustDesk应用自身接收本地UI事件
+                        // 临时重置可能阻塞触摸事件的标志
                         window.decorView.setOnTouchListener { _, event ->
-                            // 仅处理我们应用自身的UI事件，不干扰远程控制事件
-                            false // 返回false表示不消费事件，允许事件继续传递
+                            // 1. 将触摸事件传递给服务并暂停服务处理，确保应用UI可以处理它
+                            if (event.action == MotionEvent.ACTION_DOWN) {
+                                service.temporarilyResetState()
+                                
+                                // 延迟恢复服务
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    service.restoreState()
+                                }, 500) // 增加暂停时间到500ms，确保UI有足够时间响应
+                            }
+                            
+                            // 返回false，允许事件继续传递给UI处理
+                            false
                         }
                         
-                        // 确保窗口具有焦点和交互能力
+                        // 2. 确保窗口具有焦点和交互能力
                         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
                         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                        
+                        // 3. 强制刷新UI重绘，确保视觉状态正确
+                        window.decorView.invalidate()
+                        
+                        // 4. 点击时自动暂停输入服务处理
+                        // 在decorView的最外层加一个触摸监听，使整个窗口都能正确响应点击
+                        window.decorView.setOnClickListener {
+                            // 点击时临时暂停服务
+                            service.temporarilyResetState()
+                            
+                            // 延迟恢复
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                service.restoreState()
+                            }, 500)
+                        }
+                        
+                        // 5. 确保UI渲染优先级
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            window.attributes.layoutInDisplayCutoutMode = 
+                                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                        }
+                        
+                        // 关键修复：临时重置InputService的状态变量
+                        // 这会使InputService在短时间内不处理任何事件，让本地UI能够响应
+                        service.temporarilyResetState()
+                        
+                        // 延迟恢复InputService正常工作
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            service.restoreState()
+                            
+                            // 再次暂停一次，处理可能的第二次点击
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                service.temporarilyResetState()
+                                
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    service.restoreState()
+                                }, 200)
+                            }, 300)
+                        }, 200)
                     } else {
                         Log.d(logTag, "应用不在前台，无需调整UI交互")
                     }
