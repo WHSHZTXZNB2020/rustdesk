@@ -266,17 +266,25 @@ pub fn get_click_time() -> i64 {
 #[inline]
 #[cfg(not(any(target_os = "ios")))]
 pub fn authorize(id: i32) {
+    log::debug!("Authorizing connection ID: {}", id);
     if let Some(client) = CLIENTS.write().unwrap().get_mut(&id) {
         client.authorized = true;
+        log::info!("Connection {} authorized successfully", id);
         allow_err!(client.tx.send(Data::Authorize));
+    } else {
+        log::error!("Failed to authorize connection ID: {}, client not found", id);
     };
 }
 
 #[inline]
 #[cfg(not(any(target_os = "ios")))]
 pub fn close(id: i32) {
+    log::debug!("Closing connection ID: {}", id);
     if let Some(client) = CLIENTS.read().unwrap().get(&id) {
+        log::info!("Connection {} closed", id);
         allow_err!(client.tx.send(Data::Close));
+    } else {
+        log::error!("Failed to close connection ID: {}, client not found", id);
     };
 }
 
