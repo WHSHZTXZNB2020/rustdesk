@@ -111,6 +111,8 @@ class FfiModel with ChangeNotifier {
   Timer? _timer;
   var _reconnects = 1;
   bool _viewOnly = false;
+  // 用于控制UI状态覆盖，确保本地UI交互能力
+  bool uiStateOverride = false;
   WeakReference<FFI> parent;
   late final SessionID sessionId;
 
@@ -118,6 +120,10 @@ class FfiModel with ChangeNotifier {
   Timer? waitForImageTimer;
   RxBool waitForFirstImage = true.obs;
   bool isRefreshing = false;
+
+  // 存储在更新到imageModel前的图像数据
+  ui.Image? _imgWaitForImageModel;
+  Uint8List? _waitForImagePng;
 
   Rect? get rect => _rect;
   bool get isOriginalResolutionSet =>
