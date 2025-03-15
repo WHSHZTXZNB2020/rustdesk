@@ -99,12 +99,53 @@ class _RawTouchGestureDetectorRegionState
   // 添加防重复触发变量
   bool _isTapHandled = false;
   DateTime _lastTapTime = DateTime.now();
+  
+  // 添加系统区域识别
+  final _systemButtonRegion = Rect.fromLTRB(0, 0, 0, 0);
+  // 添加事件时间戳映射，用于防止重复事件
+  final Map<String, DateTime> _eventTimestamps = {};
+  // 添加应用图标区域识别
+  final _appIconRegion = Rect.fromLTRB(0, 0, 0, 0);
+  
+  // 识别不同区域
+  bool _isInSystemRegion(Offset position) => _systemButtonRegion.contains(position);
+  bool _isInAppIconRegion(Offset position) => _appIconRegion.contains(position);
 
   FFI get ffi => widget.ffi;
   FfiModel get ffiModel => widget.ffiModel;
   InputModel get inputModel => widget.inputModel;
   bool get handleTouch => (isDesktop || isWebDesktop) || ffiModel.touchMode;
   SessionID get sessionId => ffi.sessionId;
+
+  @override
+  void initState() {
+    super.initState();
+    // 初始化系统按钮区域检测
+    // 对于大多数安卓设备，底部导航栏高度约为48dp
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final size = MediaQuery.of(context).size;
+      final bottomHeight = 80.0; // 预留足够高度覆盖底部导航栏
+      setState(() {
+        _systemButtonRegion = Rect.fromLTRB(
+          0, 
+          size.height - bottomHeight,
+          size.width,
+          size.height
+        );
+        
+        // 初始化应用图标区域（通常在屏幕上部）
+        _appIconRegion = Rect.fromLTRB(
+          0,
+          0,
+          size.width,
+          size.height / 3 // 屏幕上三分之一区域
+        );
+        
+        debugPrint("系统按钮区域初始化: $_systemButtonRegion");
+        debugPrint("应用图标区域初始化: $_appIconRegion");
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,9 +163,16 @@ class _RawTouchGestureDetectorRegionState
     // 重置点击处理状态
     _isTapHandled = false;
     
+    // 清理超过1秒的事件时间戳记录
+    final now = DateTime.now();
+    _eventTimestamps.removeWhere((key, time) => 
+        now.difference(time).inMilliseconds > 1000);
+    
     // 添加调试日志
     if (isMobile && ffiModel.isPeerAndroid) {
-      debugPrint("[移动-安卓控制] 触发onTapDown事件: ${d.localPosition}");
+      final inSystemRegion = _isInSystemRegion(d.localPosition);
+      final inAppIconRegion = _isInAppIconRegion(d.localPosition);
+      debugPrint("[移动-安卓控制] 触发onTapDown事件: ${d.localPosition}, 在系统区域: $inSystemRegion, 在应用图标区域: $inAppIconRegion");
     }
     
     if (handleTouch) {
@@ -143,10 +191,18 @@ class _RawTouchGestureDetectorRegionState
     
     // 检查是否是移动设备控制安卓端的情况
     bool isMobileToAndroid = isMobile && ffiModel.isPeerAndroid;
+    bool inSystemRegion = false;
+    bool inAppIconRegion = false;
+    
+    // 记录事件时间戳和位置
+    String eventKey = "${d.localPosition.dx.toInt()}_${d.localPosition.dy.toInt()}";
+    _eventTimestamps[eventKey] = DateTime.now();
     
     // 添加调试日志
     if (isMobileToAndroid) {
-      debugPrint("[移动-安卓控制] 触发onTapUp事件: ${d.localPosition}, 处理状态:${_isTapHandled}");
+      inSystemRegion = _isInSystemRegion(d.localPosition);
+      inAppIconRegion = _isInAppIconRegion(d.localPosition);
+      debugPrint("[移动-安卓控制] 触发onTapUp事件: ${d.localPosition}, 处理状态:${_isTapHandled}, 在系统区域: $inSystemRegion, 在应用图标区域: $inAppIconRegion");
     }
     
     if (handleTouch) {
@@ -169,9 +225,21 @@ class _RawTouchGestureDetectorRegionState
         
         // 如果是移动设备控制安卓，延长防重复时间
         if (isMobileToAndroid) {
+          // 对不同区域做特殊处理，使用不同的延迟
+          int delay = 300; // 默认延迟
+          
+          if (inSystemRegion) {
+            delay = 800; // 系统导航区域延长防重复时间
+            debugPrint("[移动-安卓控制] 系统区域点击，使用延长延迟: $delay ms");
+          } else if (inAppIconRegion) {
+            delay = 400; // 应用图标区域使用中等延迟
+            debugPrint("[移动-安卓控制] 应用图标区域点击，使用中等延迟: $delay ms");
+          }
+          
           // 延迟清除状态，防止onTap又触发一次
-          Future.delayed(Duration(milliseconds: 500), () {
+          Future.delayed(Duration(milliseconds: delay), () {
             _isTapHandled = false;
+            debugPrint("[移动-安卓控制] 重置点击处理状态");
           });
         }
       }
@@ -191,9 +259,23 @@ class _RawTouchGestureDetectorRegionState
       debugPrint("[移动-安卓控制] 触发onTap事件，时间差: ${DateTime.now().difference(_lastTapTime).inMilliseconds}ms, 处理状态:${_isTapHandled}");
     }
     
+    // 系统区域特殊处理 - 完全禁止onTap处理
+    if (_isInSystemRegion(_lastPosOfDoubleTapDown)) {
+      debugPrint("[移动-安卓控制] 系统区域点击，跳过onTap事件处理");
+      return;
+    }
+    
+    // 检查是否有近期相似位置的点击
+    bool hasDuplicate = false;
+    _eventTimestamps.forEach((key, time) {
+      if (DateTime.now().difference(time).inMilliseconds < 300) {
+        hasDuplicate = true;
+      }
+    });
+    
     // 防重复点击检查
     DateTime now = DateTime.now();
-    if (now.difference(_lastTapTime).inMilliseconds < 300 || _isTapHandled) {
+    if (now.difference(_lastTapTime).inMilliseconds < 300 || _isTapHandled || hasDuplicate) {
       debugPrint("[移动-安卓控制] 跳过重复的onTap事件");
       return;
     }
@@ -205,7 +287,20 @@ class _RawTouchGestureDetectorRegionState
         // 移动设备控制安卓时，仅在Mouse模式下才发送点击，Touch模式已经在onTapUp处理过了
         if (!ffiModel.touchMode) {
           debugPrint("[移动-安卓控制] 鼠标模式下发送点击");
-          await inputModel.tap(MouseButtons.left);
+          
+          // 检查是否在应用图标区域
+          bool inAppIconRegion = _isInAppIconRegion(_lastPosOfDoubleTapDown);
+          if (inAppIconRegion) {
+            debugPrint("[移动-安卓控制] 应用图标区域点击");
+            // 对于应用图标，确保发送明确的点击事件，不要使用手势
+            await inputModel.tapDown(MouseButtons.left);
+            // 短暂延迟后发送UP事件
+            await Future.delayed(Duration(milliseconds: 50));
+            await inputModel.tapUp(MouseButtons.left);
+          } else {
+            await inputModel.tap(MouseButtons.left);
+          }
+          
           _isTapHandled = true;
           // 延迟清除状态
           Future.delayed(Duration(milliseconds: 500), () {
