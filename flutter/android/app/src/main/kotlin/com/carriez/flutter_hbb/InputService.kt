@@ -104,6 +104,7 @@ class InputService : Service {
     private var inputManager: InputManager? = null
     private lateinit var appContext: Context
     private lateinit var handler: Handler
+    private lateinit var windowManager: WindowManager
     
     // 事件处理状态
     private var lastDownTime = 0L   // 上次DOWN事件的时间戳
@@ -150,6 +151,7 @@ class InputService : Service {
         handler = Handler(Looper.getMainLooper())
         volumeController = VolumeController(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
         inputManager = context.getSystemService(Context.INPUT_SERVICE) as? InputManager
+        windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         updateScreenMetrics(context)
         Log.d(logTag, "InputService initialized with INJECT_EVENTS permission")
         Log.d(logTag, "Screen metrics: ${screenWidth}x${screenHeight}, density: $screenDensity")
@@ -331,11 +333,189 @@ class InputService : Service {
 
         // Scroll actions - 优化滚动操作
         if (mask == WHEEL_DOWN) {
-            injectOptimizedScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, -WHEEL_STEP.toFloat())
+            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, -WHEEL_STEP.toFloat())
         }
 
         if (mask == WHEEL_UP) {
-            injectOptimizedScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, WHEEL_STEP.toFloat())
+            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, WHEEL_STEP.toFloat())
+        }
+    }
+    
+    // 恢复原有的触摸输入方法，避免编译错误
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun onTouchInput(mask: Int, x: Int, y: Int) {
+        // 添加日志便于调试
+        Log.d(logTag, "接收到触摸输入事件: mask=$mask, x=$x, y=$y")
+        
+        // 记录当前系统时间，用于时间间隔计算
+        val currentTime = SystemClock.uptimeMillis()
+        
+        when (mask) {
+            TOUCH_SCALE_START -> {
+                // Handle pinch to zoom start
+                lastX = x
+                lastY = y
+                Log.d(logTag, "TOUCH_SCALE_START: 初始化缩放开始点")
+            }
+            TOUCH_SCALE -> {
+                // Handle pinch to zoom
+                val deltaX = x - lastX
+                val deltaY = y - lastY
+                lastX = x
+                lastY = y
+                
+                try {
+                    // Simulate pinch gesture
+                    val downTime = SystemClock.uptimeMillis()
+                    val eventTime = SystemClock.uptimeMillis()
+                    
+                    // 添加调试日志
+                    Log.d(logTag, "TOUCH_SCALE: 执行缩放, deltaX=$deltaX, deltaY=$deltaY")
+                    
+                    // This is a simplified implementation - in a real app you'd need to track multiple pointers
+                    val properties = arrayOf(MotionEvent.PointerProperties(), MotionEvent.PointerProperties())
+                    properties[0].id = 0
+                    properties[0].toolType = MotionEvent.TOOL_TYPE_FINGER
+                    properties[1].id = 1
+                    properties[1].toolType = MotionEvent.TOOL_TYPE_FINGER
+                    
+                    val pointerCoords = arrayOf(MotionEvent.PointerCoords(), MotionEvent.PointerCoords())
+                    pointerCoords[0].x = x.toFloat() - deltaX
+                    pointerCoords[0].y = y.toFloat() - deltaY
+                    pointerCoords[0].pressure = 1f
+                    pointerCoords[0].size = 1f
+                    
+                    pointerCoords[1].x = x.toFloat() + deltaX
+                    pointerCoords[1].y = y.toFloat() + deltaY
+                    pointerCoords[1].pressure = 1f
+                    pointerCoords[1].size = 1f
+                    
+                    val event = MotionEvent.obtain(
+                        downTime, eventTime,
+                        MotionEvent.ACTION_MOVE, 2, properties,
+                        pointerCoords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
+                    )
+                    
+                    injectEvent(event)
+                    event.recycle()
+                } catch (e: Exception) {
+                    Log.e(logTag, "Error during touch scale: ${e.message}")
+                }
+            }
+            TOUCH_SCALE_END -> {
+                // Handle pinch to zoom end
+                Log.d(logTag, "TOUCH_SCALE_END: 缩放手势结束")
+            }
+            TOUCH_PAN_START -> {
+                // 增强防重复触发逻辑
+                if (lastActionType == MotionEvent.ACTION_DOWN && 
+                    (currentTime - lastEventTime) < 200) {
+                    Log.d(logTag, "跳过重复的TOUCH_PAN_START事件，距上次: ${currentTime - lastEventTime}ms")
+                    return
+                }
+                
+                // 添加调试日志
+                Log.d(logTag, "TOUCH_PAN_START: 开始平移手势 at ($x, $y)")
+                
+                // Handle pan start
+                lastX = x
+                lastY = y
+                injectMotionEvent(MotionEvent.ACTION_DOWN, x.toFloat(), y.toFloat())
+            }
+            TOUCH_PAN_UPDATE -> {
+                // Handle pan update
+                // 添加调试日志
+                if (lastX != 0 && lastY != 0) {
+                    val deltaX = x - lastX
+                    val deltaY = y - lastY
+                    Log.d(logTag, "TOUCH_PAN_UPDATE: 平移更新, 移动: ($deltaX, $deltaY)")
+                }
+                
+                injectMotionEvent(MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat())
+                lastX = x
+                lastY = y
+            }
+            TOUCH_PAN_END -> {
+                // 增强防重复触发逻辑
+                if (lastActionType == MotionEvent.ACTION_UP && 
+                    (currentTime - lastEventTime) < 200) {
+                    Log.d(logTag, "跳过重复的TOUCH_PAN_END事件，距上次: ${currentTime - lastEventTime}ms")
+                    return
+                }
+                
+                // 添加调试日志
+                Log.d(logTag, "TOUCH_PAN_END: 平移手势结束 at ($x, $y)")
+                
+                // Handle pan end
+                injectMotionEvent(MotionEvent.ACTION_UP, x.toFloat(), y.toFloat())
+            }
+        }
+    }
+    
+    // 恢复原有的按键处理方法，避免编译错误
+    fun onKeyEvent(input: ByteArray) {
+        try {
+            val keyEvent = KeyEvent.parseFrom(input)
+            
+            when (keyEvent.getMode().number) {
+                LEGACY_MODE -> {
+                    // 使用getChr()方法获取键码
+                    val keyCode = keyEvent.getChr()
+                    val down = keyEvent.getDown()
+                    
+                    // 处理文本输入
+                    if (keyEvent.hasChr() && (down || keyEvent.getPress())) {
+                        val chr = keyEvent.getChr()
+                        if (chr != 0) {
+                            sendText(String(Character.toChars(chr)))
+                            return
+                        }
+                    }
+                    
+                    // 处理普通按键
+                    if (down) {
+                        injectKeyEvent(keyCode)
+                    } else {
+                        injectKeyEvent(keyCode)
+                    }
+                }
+                TRANSLATE_MODE -> {
+                    // 处理文本输入
+                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
+                        sendText(keyEvent.getSeq())
+                        return
+                    }
+                    
+                    // 处理普通按键
+                    val keyCode = keyEvent.getChr()
+                    if (keyEvent.getDown()) {
+                        injectKeyEvent(keyCode)
+                    } else {
+                        injectKeyEvent(keyCode)
+                    }
+                }
+                MAP_MODE -> {
+                    // 处理文本输入
+                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
+                        sendText(keyEvent.getSeq())
+                        return
+                    }
+                    
+                    // 处理普通按键
+                    val keyCode = keyEvent.getChr()
+                    if (keyEvent.getDown()) {
+                        injectKeyEvent(keyCode)
+                    } else {
+                        injectKeyEvent(keyCode)
+                    }
+                }
+                else -> {
+                    // Unsupported mode
+                    Log.e(logTag, "Unsupported keyboard mode: ${keyEvent.getMode()}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Failed to parse key event: ${e.message}")
         }
     }
 
@@ -379,28 +559,6 @@ class InputService : Service {
         return (y * screenHeight / SCREEN_INFO.height)
     }
     
-    // 优化的滚动事件注入
-    private fun injectOptimizedScroll(x: Float, y: Float, hScroll: Float, vScroll: Float) {
-        // 使用特定的标志来表示这是滚动事件
-        val now = SystemClock.uptimeMillis()
-        val source = InputDevice.SOURCE_MOUSE
-        
-        val event = MotionEvent.obtain(
-            now, now, MotionEvent.ACTION_SCROLL,
-            x, y, 0, 1.0f, 0, 1.0f, 1.0f, 0, 0
-        )
-        
-        event.setSource(source)
-        
-        try {
-            inputManager?.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC)
-        } catch (e: Exception) {
-            Log.e(logTag, "Failed to inject scroll event", e)
-        } finally {
-            event.recycle()
-        }
-    }
-
     // 优化的事件注入，添加了重试机制
     private fun retryInjectEvent(action: Int, x: Float, y: Float, isImportant: Boolean = false) {
         var retryCount = 0
@@ -420,9 +578,18 @@ class InputService : Service {
         
         handler.postDelayed(retryTask, EVENT_RETRY_DELAY)
     }
+    
+    // 注入事件的辅助方法
+    private fun injectEvent(event: InputEvent): Boolean {
+        try {
+            return inputManager?.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC) ?: false
+        } catch (e: Exception) {
+            Log.e(logTag, "Error injecting event: ${e.message}")
+            return false
+        }
+    }
 
     // 优化过的触摸事件注入方法
-    @RequiresApi(Build.VERSION_CODES.N)
     private fun injectMotionEvent(
         action: Int,
         x: Float,
@@ -444,29 +611,20 @@ class InputService : Service {
             downTime,
             now,
             action,
-            1, // pointerCount
-            arrayOf(MotionEvent.PointerProperties().apply {
-                id = 0
-                toolType = MotionEvent.TOOL_TYPE_FINGER
-            }),
-            arrayOf(MotionEvent.PointerCoords().apply {
-                this.x = x
-                this.y = y
-                pressure = 1.0f
-                size = 1.0f
-            }),
-            0, // metaState
-            0, // buttonState
-            1.0f, // xPrecision
-            1.0f, // yPrecision
-            0, // deviceId
-            0, // edgeFlags
-            source, // source
-            0 // flags
+            x, y,
+            1.0f, // 压力
+            1.0f, // 大小
+            0, // 元状态
+            1.0f, // X精度
+            1.0f, // Y精度
+            0, // 设备ID
+            0  // 边缘标志
         )
+        
+        event.source = source
 
         try {
-            val result = inputManager!!.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC)
+            val result = injectEvent(event)
             if (result) {
                 lastEventTime = now
                 lastActionType = action
@@ -483,7 +641,6 @@ class InputService : Service {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
     private fun injectLongPress(x: Float, y: Float) {
         // 长按操作优化
         val now = SystemClock.uptimeMillis()
@@ -505,34 +662,18 @@ class InputService : Service {
         val source = InputDevice.SOURCE_MOUSE
         val now = SystemClock.uptimeMillis()
         
-        // 提供更精细的滚动体验
-        val scrollFactor = 1.0f
-        val adjustedVScroll = vScroll * scrollFactor
-        
+        // 构建滚动事件
         val event = MotionEvent.obtain(
             now, now, MotionEvent.ACTION_SCROLL,
-            1, // pointerCount
-            arrayOf(MotionEvent.PointerProperties().apply {
-                id = 0
-                toolType = MotionEvent.TOOL_TYPE_MOUSE
-            }),
-            arrayOf(MotionEvent.PointerCoords().apply {
-                this.x = x
-                this.y = y
-                setAxisValue(MotionEvent.AXIS_VSCROLL, adjustedVScroll)
-            }),
-            0, // metaState
-            0, // buttonState
-            1.0f, // xPrecision
-            1.0f, // yPrecision
-            0, // deviceId
-            0, // edgeFlags
-            source, // source
-            0 // flags
+            1, // 指针数量
+            x, y,
+            0.0f, 0.0f, 0, 0.0f, 0.0f, 0, 0
         )
         
+        event.source = source
+        
         try {
-            inputManager?.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC)
+            injectEvent(event)
         } catch (e: Exception) {
             Log.e(logTag, "Failed to inject scroll event", e)
         } finally {
@@ -557,7 +698,7 @@ class InputService : Service {
         )
 
         try {
-            inputManager!!.injectInputEvent(downEvent, INJECT_INPUT_EVENT_MODE_ASYNC)
+            injectEvent(downEvent)
         } catch (e: Exception) {
             Log.e(logTag, "Failed to inject key DOWN event", e)
         }
@@ -570,47 +711,9 @@ class InputService : Service {
         )
 
         try {
-            inputManager!!.injectInputEvent(upEvent, INJECT_INPUT_EVENT_MODE_ASYNC)
+            injectEvent(upEvent)
         } catch (e: Exception) {
             Log.e(logTag, "Failed to inject key UP event", e)
-        }
-    }
-
-    /**
-     * 处理特殊键盘输入
-     */
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onKeyboardInput(keyEvt: KeyEvent, mode: Int) {
-        val name = KeyEventAndroid.keyCodeToString(keyEvt.keycode)
-        val keyCode = keyEvt.keycode
-        val isDown = keyEvt.down
-        val alt = keyEvt.alt
-        val ctrl = keyEvt.ctrl
-        val shift = keyEvt.shift
-        val meta = keyEvt.command
-        
-        // 优化键盘输入
-        val now = SystemClock.uptimeMillis()
-        val source = InputDevice.SOURCE_KEYBOARD
-        
-        try {
-            var metaState = 0
-            if (alt) metaState = metaState or KeyEventAndroid.META_ALT_ON
-            if (ctrl) metaState = metaState or KeyEventAndroid.META_CTRL_ON
-            if (shift) metaState = metaState or KeyEventAndroid.META_SHIFT_ON
-            if (meta) metaState = metaState or KeyEventAndroid.META_META_ON
-
-            val action = if (isDown) KeyEventAndroid.ACTION_DOWN else KeyEventAndroid.ACTION_UP
-            
-            val event = KeyEventAndroid(
-                now, now, action, keyCode, 0, metaState,
-                KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0,
-                source
-            )
-            
-            inputManager?.injectInputEvent(event, INJECT_INPUT_EVENT_MODE_ASYNC)
-        } catch (e: Exception) {
-            Log.e(logTag, "Failed to inject keyboard event: $name", e)
         }
     }
 
@@ -644,8 +747,8 @@ class InputService : Service {
             val source = InputDevice.SOURCE_KEYBOARD
             
             // 优化键盘字符输入
-            val event = KeyEventAndroid.getDeadChar(ch.code, 0)
-            if (event == 0) {
+            val deadChar = KeyEventAndroid.getDeadChar(ch.code, 0)
+            if (deadChar == 0) {
                 // 普通字符输入
                 val charVal = ch.code
                 
@@ -656,14 +759,16 @@ class InputService : Service {
                     source
                 )
                 
-                val keyCharacterMap = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
-                val deadKeyDownEvent = KeyEventAndroid.changeAction(downEvent, KeyEventAndroid.ACTION_DOWN)
-                
-                inputManager?.injectInputEvent(deadKeyDownEvent, INJECT_INPUT_EVENT_MODE_ASYNC)
+                injectEvent(downEvent)
                 
                 // UP事件
-                val upEvent = KeyEventAndroid.changeAction(downEvent, KeyEventAndroid.ACTION_UP)
-                inputManager?.injectInputEvent(upEvent, INJECT_INPUT_EVENT_MODE_ASYNC)
+                val upEvent = KeyEventAndroid(
+                    now, now, KeyEventAndroid.ACTION_UP, KeyEventAndroid.KEYCODE_UNKNOWN, 0,
+                    0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEventAndroid.FLAG_SOFT_KEYBOARD,
+                    source
+                )
+                
+                injectEvent(upEvent)
             } else {
                 // 特殊字符处理
                 Log.d(logTag, "Special character: ${ch.code}")
@@ -673,7 +778,8 @@ class InputService : Service {
         }
     }
 
-    private fun disableSelf() {
+    // 公开方法，允许外部调用
+    fun disableSelf() {
         ctx = null
         timer.cancel()
     }
