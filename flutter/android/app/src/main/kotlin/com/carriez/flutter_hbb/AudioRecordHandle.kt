@@ -25,6 +25,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
     private var minBufferSize = 0
     private var audioRecordStat = false
     private var audioThread: Thread? = null
+    private var usesSystemPermissions = false
 
     @RequiresApi(Build.VERSION_CODES.M)
     fun createAudioRecorder(inVoiceCall: Boolean, mediaProjection: MediaProjection?): Boolean {
@@ -40,6 +41,12 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
             return false
         }
 
+        // 检查系统级权限
+        val captureVideoPermission = context.checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = context.checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        usesSystemPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+                                readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
+        
         var builder = AudioRecord.Builder()
         .setAudioFormat(
             AudioFormat.Builder()
@@ -49,19 +56,23 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
         );
         if (inVoiceCall) {
             builder.setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+        } else if (usesSystemPermissions) {
+            // 使用系统权限时，直接设置为系统音频源
+            Log.d(logTag, "Using system permissions for audio capture")
+            builder.setAudioSource(MediaRecorder.AudioSource.REMOTE_SUBMIX)
+        } else if (mediaProjection != null) {
+            // 兼容旧的MediaProjection方式
+            var apcc = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            .addMatchingUsage(AudioAttributes.USAGE_ALARM)
+            .addMatchingUsage(AudioAttributes.USAGE_GAME)
+            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build();
+            builder.setAudioPlaybackCaptureConfig(apcc);
         } else {
-            mediaProjection?.let {
-                var apcc = AudioPlaybackCaptureConfiguration.Builder(it)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_ALARM)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build();
-                builder.setAudioPlaybackCaptureConfig(apcc);
-            } ?: let {
-                Log.d(logTag, "createAudioRecorder failed, mediaProjection null")
-                return false
-            }
+            Log.d(logTag, "createAudioRecorder failed, no mediaProjection and no system permissions")
+            return false
         }
+        
         audioRecorder = builder.build()
         Log.d(logTag, "createAudioRecorder done,minBufferSize:$minBufferSize")
         return true
@@ -189,5 +200,10 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
 
         audioRecordStat = false
         audioThread?.join()
+    }
+    
+    // 判断是否支持语音通话的辅助方法
+    private fun isSupportVoiceCall(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
     }
 }
