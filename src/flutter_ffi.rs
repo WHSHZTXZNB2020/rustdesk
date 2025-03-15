@@ -2364,58 +2364,77 @@ pub mod server_side {
         app_dir: JString,
         custom_client_config: JString,
     ) {
-        log::debug!("startServer from jvm");
+        log::debug!("startServer from jvm with params: app_dir={:?}, config={:?}", app_dir, custom_client_config);
         let mut env = env;
-        if let Ok(app_dir) = env.get_string(&app_dir) {
-            *config::APP_DIR.write().unwrap() = app_dir.into();
-        }
-        if let Ok(custom_client_config) = env.get_string(&custom_client_config) {
-            let custom_client_config_str: String = custom_client_config.into();
-            if custom_client_config_str == "connection_response" {
-                // 处理连接授权响应
-                if let Ok(app_dir) = env.get_string(&app_dir) {
-                    let auth_json: String = app_dir.into();
-                    log::debug!("Processing connection_response: {}", auth_json);
-                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
-                        if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
-                            if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
-                                if res {
-                                    // 授权连接
-                                    let id = id as i32;
-                                    crate::ui_cm_interface::authorize(id);
-                                    log::debug!("Authorized connection {}", id);
-                                } else {
-                                    // 拒绝连接
-                                    let id = id as i32;
-                                    crate::ui_cm_interface::close(id);
-                                    log::debug!("Closed connection {}", id);
-                                }
-                            }
+        // 获取参数字符串
+        let app_dir_str = if let Ok(s) = env.get_string(&app_dir) {
+            s.into()
+        } else {
+            log::error!("Failed to get app_dir string from JNI");
+            String::new()
+        };
+        
+        let custom_client_config_str = if let Ok(s) = env.get_string(&custom_client_config) {
+            s.into()
+        } else {
+            log::error!("Failed to get custom_client_config string from JNI");
+            String::new()
+        };
+        
+        log::debug!("startServer parsed params: app_dir={}, config={}", app_dir_str, custom_client_config_str);
+        
+        if custom_client_config_str == "connection_response" {
+            // 处理连接授权响应
+            log::debug!("Processing connection_response: {}", app_dir_str);
+            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&app_dir_str) {
+                if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                    if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                        let id = id as i32;
+                        if res {
+                            // 授权连接
+                            log::debug!("Authorized connection {}", id);
+                            crate::ui_cm_interface::authorize(id);
+                        } else {
+                            // 拒绝连接
+                            log::debug!("Closed connection {}", id);
+                            crate::ui_cm_interface::close(id);
                         }
+                    } else {
+                        log::error!("Invalid id or res type in auth JSON");
+                    }
+                } else {
+                    log::error!("Missing id or res in auth JSON");
+                }
+            } else {
+                log::error!("Failed to parse auth JSON: {}", app_dir_str);
+            }
+        } else if custom_client_config_str == "voice_call_response" {
+            // 处理语音通话响应
+            log::debug!("Processing voice_call_response: {}", app_dir_str);
+            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&app_dir_str) {
+                if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                    if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                        let id = id as i32;
+                        // 处理语音通话响应
+                        log::debug!("Processing voice call response for {}: {}", id, res);
+                        crate::ui_cm_interface::cm_handle_incoming_voice_call(id, res);
                     }
                 }
-            } else if custom_client_config_str == "voice_call_response" {
-                // 处理语音通话响应
-                if let Ok(app_dir) = env.get_string(&app_dir) {
-                    let auth_json: String = app_dir.into();
-                    log::debug!("Processing voice_call_response: {}", auth_json);
-                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
-                        if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
-                            if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
-                                let id = id as i32;
-                                // 处理语音通话响应
-                                crate::ui_cm_interface::cm_handle_incoming_voice_call(id, res);
-                                log::debug!("Processed voice call response for {}: {}", id, res);
-                            }
-                        }
-                    }
-                }
-            } else if !custom_client_config_str.is_empty() {
-                // 原有的逻辑
+            }
+        } else {
+            // 设置APP_DIR
+            if !app_dir_str.is_empty() {
+                *config::APP_DIR.write().unwrap() = app_dir_str;
+            }
+            
+            // 处理自定义客户端配置
+            if !custom_client_config_str.is_empty() {
                 crate::read_custom_client(&custom_client_config_str);
             }
+            
+            // 启动服务器
+            std::thread::spawn(move || start_server(true));
         }
-        std::thread::spawn(move || start_server(true));
     }
 
     #[no_mangle]
@@ -2472,4 +2491,66 @@ pub mod server_side {
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
     }
+}
+
+#[cfg(not(target_os = "android"))]
+#[no_mangle]
+pub unsafe extern "system" fn Java_ffi_FFI_startServer(
+    env: JNIEnv,
+    _class: JClass,
+    app_dir: JString,
+    custom_client_config: JString,
+) {
+    log::debug!("startServer from jvm (non-android)");
+    let mut env = env;
+    if let Ok(app_dir) = env.get_string(&app_dir) {
+        *config::APP_DIR.write().unwrap() = app_dir.into();
+    }
+    if let Ok(custom_client_config) = env.get_string(&custom_client_config) {
+        let custom_client_config_str: String = custom_client_config.into();
+        if custom_client_config_str == "connection_response" {
+            // 处理连接授权响应
+            if let Ok(app_dir) = env.get_string(&app_dir) {
+                let auth_json: String = app_dir.into();
+                log::debug!("Processing connection_response: {}", auth_json);
+                if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
+                    if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                        if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                            if res {
+                                // 授权连接
+                                let id = id as i32;
+                                crate::ui_cm_interface::authorize(id);
+                                log::debug!("Authorized connection {}", id);
+                            } else {
+                                // 拒绝连接
+                                let id = id as i32;
+                                crate::ui_cm_interface::close(id);
+                                log::debug!("Closed connection {}", id);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if custom_client_config_str == "voice_call_response" {
+            // 处理语音通话响应
+            if let Ok(app_dir) = env.get_string(&app_dir) {
+                let auth_json: String = app_dir.into();
+                log::debug!("Processing voice_call_response: {}", auth_json);
+                if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&auth_json) {
+                    if let (Some(id), Some(res)) = (auth.get("id"), auth.get("res")) {
+                        if let (Some(id), Some(res)) = (id.as_i64(), res.as_bool()) {
+                            let id = id as i32;
+                            // 处理语音通话响应
+                            crate::ui_cm_interface::cm_handle_incoming_voice_call(id, res);
+                            log::debug!("Processed voice call response for {}: {}", id, res);
+                        }
+                    }
+                }
+            }
+        } else if !custom_client_config_str.is_empty() {
+            // 原有的逻辑
+            crate::read_custom_client(&custom_client_config_str);
+        }
+    }
+    std::thread::spawn(move || start_server(true));
 }
