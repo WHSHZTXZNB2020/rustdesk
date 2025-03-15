@@ -37,6 +37,11 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
+import androidx.annotation.NonNull
+import androidx.databinding.Observable
+import io.flutter.plugins.GeneratedPluginRegistrant
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -48,27 +53,75 @@ class MainActivity : FlutterActivity() {
         // 系统级权限常量字符串
         const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
         const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
+        
+        // 添加系统区域检测
+        private var systemAreaHeight = 0
+        
+        // 默认系统区域的高度比例（相对于屏幕总高度）
+        private const val SYSTEM_AREA_HEIGHT_RATIO = 0.1f
+        
+        @JvmStatic
+        fun isInSystemArea(y: Float, screenHeight: Int): Boolean {
+            if (screenHeight <= 0) return false
+            
+            // 初始化系统区域高度
+            if (systemAreaHeight <= 0) {
+                systemAreaHeight = (screenHeight * SYSTEM_AREA_HEIGHT_RATIO).toInt()
+            }
+            
+            return y > screenHeight - systemAreaHeight
+        }
     }
 
-    private val channelTag = "mChannel"
-    private val logTag = "mMainActivity"
+    private val channelTag = "com.carriez.flutter_hbb/main"
+    private val logTag = "MainActivity"
     private var mainService: MainService? = null
+    private lateinit var channel: MethodChannel
+    private var uiInteractionHandler: Handler? = null
+    private var screenHeight = 0
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+    override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
+        GeneratedPluginRegistrant.registerWith(flutterEngine)
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelTag)
+        flutterMethodChannel = channel
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "init_service" -> result.success(0)
+                "start_service" -> result.success(0)
+                "stop_service" -> result.success(0)
+                "check_service" -> {
+                    // 检查输入服务是否存在并正常工作
+                    val serviceRunning = inputService != null
+                    result.success(serviceRunning)
+                }
+                "pause_input" -> {
+                    // 暂停输入服务
+                    inputService?.temporarilyPauseInput()
+                    result.success(true)
+                }
+                "resume_input" -> {
+                    // 恢复输入服务
+                    inputService?.resumeInputAfterPause()
+                    result.success(true)
+                }
+                "register_input_service" -> {
+                    // 注册输入服务到主活动
+                    if (inputService == null) {
+                        inputService = InputService()
+                    }
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
         if (MainService.isReady) {
             Intent(activity, MainService::class.java).also {
                 bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
             }
         }
-        flutterMethodChannel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            channelTag
-        )
-        initFlutterChannel(flutterMethodChannel!!)
         thread { setCodecInfo() }
     }
 
@@ -80,6 +133,13 @@ class MainActivity : FlutterActivity() {
                 "on_state_changed",
                 mapOf("name" to "input", "value" to inputPer.toString())
             )
+        }
+        // 当活动恢复时，确保输入服务不会阻塞UI交互
+        inputService?.let {
+            it.temporarilyPauseInput()
+            Handler(Looper.getMainLooper()).postDelayed({
+                it.resumeInputAfterPause()
+            }, 500)
         }
     }
 
@@ -123,6 +183,9 @@ class MainActivity : FlutterActivity() {
         } else {
             Log.d(logTag, "系统级权限未授权")
         }
+        
+        // 初始化屏幕高度
+        screenHeight = resources.displayMetrics.heightPixels
     }
 
     override fun onDestroy() {
@@ -596,10 +659,14 @@ class MainActivity : FlutterActivity() {
                             if (event.action == MotionEvent.ACTION_DOWN) {
                                 service.temporarilyResetState()
                                 
+                                // 根据触摸位置判断是否在系统区域，调整暂停时间
+                                val isSystemArea = isInSystemArea(event.y.toFloat(), screenHeight)
+                                val pauseTime = if (isSystemArea) 800 else 400
+                                
                                 // 延迟恢复服务
                                 Handler(Looper.getMainLooper()).postDelayed({
                                     service.restoreState()
-                                }, 500) // 增加暂停时间到500ms，确保UI有足够时间响应
+                                }, pauseTime.toLong()) // 根据区域调整暂停时间
                             }
                             
                             // 返回false，允许事件继续传递给UI处理
@@ -622,7 +689,7 @@ class MainActivity : FlutterActivity() {
                             // 延迟恢复
                             Handler(Looper.getMainLooper()).postDelayed({
                                 service.restoreState()
-                            }, 500)
+                            }, 300)
                         }
                         
                         // 5. 确保UI渲染优先级
@@ -674,5 +741,25 @@ class MainActivity : FlutterActivity() {
             Log.e(logTag, "检查应用前台状态时出错: ${e.message}")
         }
         return false
+    }
+    
+    // 重写触摸事件处理
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        ev?.let { event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                // 确保UI能响应触摸
+                ensureUiInteractive()
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+    
+    // 重写窗口焦点变化处理
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // 当窗口获得焦点时，确保UI能响应触摸
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        }
     }
 }
