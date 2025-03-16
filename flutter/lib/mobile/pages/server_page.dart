@@ -482,78 +482,74 @@ class _ServerInfoState extends State<ServerInfo> {
     debugPrint("==== SunmiSN调试 ==== 开始获取SN号...");
     
     try {
-      // 尝试直接获取
-      final sn = await gFFI.invokeMethod("get_device_sn");
-      debugPrint("==== SunmiSN调试 ==== Flutter层收到原始SN: '$sn' (${sn?.runtimeType})");
+      // 修复类型错误问题，使用明确的返回值处理
+      dynamic result = await gFFI.invokeMethod("get_device_sn");
+      debugPrint("==== SunmiSN调试 ==== 收到原始返回值: '$result' (${result?.runtimeType})");
       
-      // 确保SN不为空且有效
-      String validSN = "Unknown";
-      if (sn != null) {
-        String snStr = sn.toString().trim();
-        if (snStr.isNotEmpty && snStr != "null" && snStr != "Unknown") {
-          validSN = snStr;
-          debugPrint("==== SunmiSN调试 ==== SN有效: '$validSN'");
+      if (result is String) {
+        // 直接处理字符串返回值
+        String snStr = result.trim();
+        if (snStr.isNotEmpty && snStr != "Unknown") {
+          setState(() {
+            _deviceSN = snStr;
+            _hasFetchedSN = true;
+            debugPrint("==== SunmiSN调试 ==== 成功设置SN: '$_deviceSN'");
+          });
         } else {
-          debugPrint("==== SunmiSN调试 ==== SN无效: '$snStr'");
+          debugPrint("==== SunmiSN调试 ==== 返回的SN为空或Unknown");
+          setState(() {
+            _deviceSN = "Unknown";
+            _hasFetchedSN = true;
+          });
         }
-      }
-      
-      // 不管SN是否有效，更新UI
-      if (mounted) {
-        setState(() {
-          _deviceSN = validSN;
-          _hasFetchedSN = true;
-          debugPrint("==== SunmiSN调试 ==== 已更新UI，SN为: '$_deviceSN'");
-        });
-      }
-      
-      // 如果没有获取到有效SN，延迟再试一次
-      if (validSN == "Unknown") {
-        debugPrint("==== SunmiSN调试 ==== 首次获取SN失败，3秒后重试...");
-        await Future.delayed(Duration(seconds: 3));
-        if (!mounted) return;
-        
-        try {
-          final retry = await gFFI.invokeMethod("get_device_sn");
-          debugPrint("==== SunmiSN调试 ==== 重试获取SN: '$retry'");
-          
-          if (retry != null && retry.toString().trim().isNotEmpty && 
-              retry.toString() != "null" && retry.toString() != "Unknown") {
+      } else if (result is bool) {
+        // 处理布尔值返回情况
+        debugPrint("==== SunmiSN调试 ==== 返回值是布尔值: $result，再次请求真实SN");
+        // 如果返回true，尝试再次获取SN
+        if (result) {
+          await Future.delayed(Duration(seconds: 1));
+          if (!mounted) return;
+          try {
+            final sn = await gFFI.invokeMethod("get_device_sn");
+            debugPrint("==== SunmiSN调试 ==== 第二次尝试结果: '$sn'");
+            if (sn is String && sn.trim().isNotEmpty && sn != "Unknown") {
+              setState(() {
+                _deviceSN = sn.trim();
+                _hasFetchedSN = true;
+                debugPrint("==== SunmiSN调试 ==== 第二次成功获取SN: '$_deviceSN'");
+              });
+            } else {
+              setState(() {
+                _deviceSN = "Unknown";
+                _hasFetchedSN = true;
+              });
+            }
+          } catch (e) {
+            debugPrint("==== SunmiSN调试 ==== 第二次获取SN异常: $e");
             setState(() {
-              _deviceSN = retry.toString().trim();
-              debugPrint("==== SunmiSN调试 ==== 重试成功，更新SN为: '$_deviceSN'");
+              _deviceSN = "Unknown";
+              _hasFetchedSN = true;
             });
           }
-        } catch (e) {
-          debugPrint("==== SunmiSN调试 ==== 重试获取SN失败: $e");
+        } else {
+          setState(() {
+            _deviceSN = "Unknown";
+            _hasFetchedSN = true;
+          });
         }
-      }
-    } catch (e) {
-      debugPrint("==== SunmiSN调试 ==== 获取SN号异常: $e");
-      if (mounted) {
+      } else {
+        debugPrint("==== SunmiSN调试 ==== 返回值类型未知: ${result?.runtimeType}");
         setState(() {
           _deviceSN = "Unknown";
           _hasFetchedSN = true;
-          debugPrint("==== SunmiSN调试 ==== 异常后设置SN为Unknown");
         });
       }
-      
-      // 异常情况下也尝试重试一次
-      await Future.delayed(Duration(seconds: 3));
-      if (!mounted) return;
-      
-      try {
-        debugPrint("==== SunmiSN调试 ==== 异常后重试获取SN...");
-        final retry = await gFFI.invokeMethod("get_device_sn");
-        if (retry != null && retry.toString().trim().isNotEmpty) {
-          setState(() {
-            _deviceSN = retry.toString().trim();
-            debugPrint("==== SunmiSN调试 ==== 异常后重试成功: '$_deviceSN'");
-          });
-        }
-      } catch (e) {
-        debugPrint("==== SunmiSN调试 ==== 异常后重试失败: $e");
-      }
+    } catch (e) {
+      debugPrint("==== SunmiSN调试 ==== 获取SN号异常: $e");
+      setState(() {
+        _deviceSN = "Unknown";
+        _hasFetchedSN = true;
+      });
     }
   }
 
