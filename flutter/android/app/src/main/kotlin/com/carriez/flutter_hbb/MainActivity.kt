@@ -468,20 +468,24 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_device_sn" -> {
                     try {
-                        Log.d("SunmiSN", "Flutter请求获取SN号")
+                        Log.d("SunmiSN", "获取SN号")
                         val sn = getDeviceSN(this)
                         Log.d("SunmiSN", "获取到SN: '$sn'")
                         
-                        // 通过方法通道异步传递SN号到Flutter
+                        // 通过事件通道发送SN到Flutter
                         Handler(Looper.getMainLooper()).post {
-                            Companion.flutterMethodChannel?.invokeMethod(
-                                "on_sn_received", 
-                                mapOf("sn" to sn)
-                            )
-                            Log.d("SunmiSN", "已发送SN给Flutter: '$sn'")
+                            try {
+                                MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mChannel").invokeMethod(
+                                    "on_sn_received", 
+                                    mapOf("sn" to sn)
+                                )
+                                Log.d("SunmiSN", "已发送SN给Flutter: '$sn'")
+                            } catch (e: Exception) {
+                                Log.e("SunmiSN", "发送SN失败: ${e.message}")
+                            }
                         }
                         
-                        // 直接返回true
+                        // 返回成功
                         result.success(true)
                     } catch (e: Exception) {
                         Log.e("SunmiSN", "获取SN号失败: ${e.message}")
