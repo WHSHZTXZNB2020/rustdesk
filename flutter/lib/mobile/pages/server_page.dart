@@ -510,18 +510,30 @@ class _ServerInfoState extends State<ServerInfo> {
           await Future.delayed(Duration(seconds: 1));
           if (!mounted) return;
           try {
-            final sn = await gFFI.invokeMethod("get_device_sn");
+            final dynamic sn = await gFFI.invokeMethod("get_device_sn");
             debugPrint("==== SunmiSN调试 ==== 第二次尝试结果: '$sn'");
-            if (sn is String && sn.trim().isNotEmpty && sn != "Unknown") {
-              setState(() {
-                _deviceSN = sn.trim();
-                _hasFetchedSN = true;
-                debugPrint("==== SunmiSN调试 ==== 第二次成功获取SN: '$_deviceSN'");
-              });
+            
+            if (sn is String) {
+              // 确保sn是字符串类型后再调用trim()
+              final String snStr = sn;
+              if (snStr.trim().isNotEmpty && snStr != "Unknown") {
+                setState(() {
+                  _deviceSN = snStr.trim();
+                  _hasFetchedSN = true;
+                  debugPrint("==== SunmiSN调试 ==== 第二次成功获取SN: '$_deviceSN'");
+                });
+              } else {
+                setState(() {
+                  _deviceSN = "Unknown";
+                  _hasFetchedSN = true;
+                });
+              }
             } else {
+              // 非字符串类型
               setState(() {
                 _deviceSN = "Unknown";
                 _hasFetchedSN = true;
+                debugPrint("==== SunmiSN调试 ==== 第二次获取SN类型错误: ${sn?.runtimeType}");
               });
             }
           } catch (e) {
