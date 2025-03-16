@@ -449,51 +449,52 @@ class _ServerInfoState extends State<ServerInfo> {
     }
 
     return PaddingCard(
-        title: cardTitle, // 动态设置标题
-        // 设置标题字体大小为18px
-        titleTextStyle: const TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
-        // 移除标题图标
-        titleIcon: null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // SN号显示在标题下方，仅当有SN时显示，减少间距
-            if (_deviceSN.isNotEmpty && _deviceSN != "Unknown")
-              Padding(
-                // 减少顶部和底部间距
-                padding: const EdgeInsets.only(bottom: 10, top: 0),
+      title: cardTitle,
+      titleIcon: null, // 移除标题图标
+      titleTextStyle: TextStyle(
+        fontSize: 18.0, // 设置标题字体大小为18px
+        fontWeight: FontWeight.bold,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 首先显示SN号（如果有）
+          if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
+            Text(
+              _deviceSN,
+              style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // 设置SN字体大小为25px
+            ),
+          
+          const SizedBox(height: 15),
+          
+          // 然后显示ID部分（保留图标）
+          Row(children: [
+            Image.asset('assets/ID.svg', width: iconSize, height: iconSize),
+            const SizedBox(width: 8),
+            Text(
+              translate('ID'),
+              style: textStyleHeading,
+            )
+          ]),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              Expanded(
                 child: Text(
-                  _deviceSN,
-                  // 保持SN字体为25.0
-                  style: const TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold),
+                  (serverModel.serverId.isEmpty) ? 'loading...' : serverModel.serverId,
+                  style: textStyleValue,
                 ),
               ),
-            
-            // ID - 保留左侧图标
-            Row(children: [
-              const Icon(Icons.perm_identity,
-                      color: Colors.grey, size: iconSize)
-                  .marginOnly(right: iconMarginRight),
-              Text(
-                translate('ID'),
-                style: textStyleHeading,
-              )
-            ]),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    model.serverId.value.text,
-                    style: textStyleValue,
-                  ),
-                ),
-              ],
-            ).marginOnly(left: 39, bottom: 15),
-            
-            // 连接状态
-            ConnectionStateNotification()
-          ],
-        ));
+            ],
+          ),
+          
+          const SizedBox(height: 15),
+          
+          // 连接状态
+          ConnectionStateNotification()
+        ],
+      ),
+    );
   }
 }
 
@@ -606,226 +607,341 @@ class PermissionChecker extends StatefulWidget {
   const PermissionChecker({Key? key}) : super(key: key);
 
   @override
-  State<PermissionChecker> createState() => _PermissionCheckerState();
+  State<StatefulWidget> createState() => _PermissionCheckerState();
 }
 
 class _PermissionCheckerState extends State<PermissionChecker> {
   @override
   Widget build(BuildContext context) {
-    final serverModel = Provider.of<ServerModel>(context);
-    final hasAudioPermission = androidVersion >= 30;
-    return PaddingCard(
+    return Consumer<ServerModel>(builder: (context, model, child) {
+      return PaddingCard(
         title: translate("权限"),
-        // 只移除标题图标
-        titleIcon: null,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          serverModel.mediaOk
-              ? ElevatedButton.icon(
-                      style: ButtonStyle(
-                          backgroundColor:
-                              MaterialStateProperty.all(Colors.red)),
-                      icon: const Icon(Icons.stop),
-                      onPressed: serverModel.toggleService,
-                      label: Text(translate("Stop service")))
-                  .marginOnly(bottom: 8)
-              : SizedBox.shrink(),
-          // 屏幕录制开关也不显示，因为有服务未运行页面的启动按钮和自动启动功能
-          // SwitchListTile(
-          //   visualDensity: VisualDensity.compact,
-          //   contentPadding: EdgeInsets.all(0),
-          //   title: Text(translate("Screen Capture")),
-          //   value: serverModel.mediaOk,
-          //   onChanged: serverModel.mediaOk ? null : (_) => serverModel.toggleService(),
-          // ),
-          // Input Control functionality is still active but not displayed in UI
-          PermissionRow(translate("Transfer file"), serverModel.fileOk,
-              serverModel.toggleFile),
-          hasAudioPermission
-              ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
-                  serverModel.toggleAudio)
-              : Row(children: [
-                  // 保留内部图标
-                  Icon(Icons.info_outline).marginOnly(right: 15),
-                  Expanded(
-                      child: Text(
-                    translate("android_version_audio_tip"),
-                    style: const TextStyle(color: MyTheme.darkGray),
-                  ))
-                ]),
-          PermissionRow(translate("Enable clipboard"), serverModel.clipboardOk,
-              serverModel.toggleClipboard),
-        ]));
-  }
-}
-
-class PermissionRow extends StatelessWidget {
-  const PermissionRow(this.name, this.isOk, this.onPressed, {Key? key})
-      : super(key: key);
-
-  final String name;
-  final bool isOk;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    // 如果是"输入控制"或"屏幕录制"且已启用，则禁用开关操作
-    if ((name == translate("Input Control") || 
-         name == translate("使用系统权限捕获屏幕") || 
-         name == translate("Screen Capture")) && isOk) {
-      return SwitchListTile(
-        visualDensity: VisualDensity.compact,
-        contentPadding: EdgeInsets.all(0),
-        title: Text(name),
-        value: isOk,
-        onChanged: null, // 设置为null使开关变为只读
+        titleIcon: null, // 移除权限标题图标
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 只显示停止服务按钮
+            if (model.isStart)
+              ElevatedButton(
+                style: ButtonStyle(
+                  backgroundColor: MaterialStateProperty.all(Colors.red),
+                ),
+                onPressed: () {
+                  model.toggleService();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    translate("停止服务"),
+                    style: TextStyle(fontSize: 16.0),
+                  ),
+                ),
+              ),
+          ],
+        ),
       );
-     }
-    
-    return SwitchListTile(
-        visualDensity: VisualDensity.compact,
-        contentPadding: EdgeInsets.all(0),
-        title: Text(name),
-        value: isOk,
-        onChanged: (bool value) {
-          onPressed();
-        });
+    });
   }
 }
 
-class ConnectionManager extends StatelessWidget {
-  const ConnectionManager({Key? key}) : super(key: key);
+class ConnectionManager extends StatefulWidget {
+  ConnectionManager({Key? key}) : super(key: key);
+
+  @override
+  State<StatefulWidget> createState() => _ConnectionManagerState();
+}
+
+class _ConnectionManagerState extends State<ConnectionManager>
+    with SingleTickerProviderStateMixin {
+  final tabController = ScrollController();
+
+  final List<Widget> children = [SendTabPage(), RecvTabPage()];
+
+  var clients = List<Client>.empty();
+  var fakeClientMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    if (isAndroid) {
+      gFFI.serverModel.updateClientState();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final serverModel = Provider.of<ServerModel>(context);
-    if (serverModel.clients.isEmpty) return Offstage();
+    final getClientIcon = gFFI.serverModel.getClientIcon;
     return PaddingCard(
-      title: translate("Connections"),
-      // 保留默认图标
-      // titleIcon: null,
-      child: Column(
+      title: translate('Connections'),
+      child: Consumer<ServerModel>(builder: (context, model, child) {
+        if (!isAndroid) {
+          model.updateClientState();
+        }
+        clients = model.clients.toList();
+        return Column(
+          children: [
+            FutureBuilder<bool>(
+              future: Future.value(false),
+              builder: (context, snapshot) {
+                fakeClientMode = snapshot.data ?? false;
+                return SingleChildScrollView(
+                  controller: tabController,
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: clients.isEmpty
+                      ? Center(
+                          child: Text(translate('Empty'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                              )))
+                      : Column(
+                          children: clients
+                              .map((client) => Column(
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: str2color('${client.peerId}${client.id}', 0x7f),
+                                              borderRadius: BorderRadius.circular(5),
+                                            ),
+                                            child: Center(
+                                              child: Icon(
+                                                getClientIcon(client),
+                                                color: Colors.white,
+                                                size: 28,
+                                              ),
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: Container(
+                                              margin: const EdgeInsets.only(left: 10),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Text(
+                                                          client.name
+                                                              .overflow,
+                                                          style: const TextStyle(
+                                                              fontSize: 18,
+                                                              overflow: TextOverflow
+                                                                  .ellipsis),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                    height: 2,
+                                                  ),
+                                                  Text(
+                                                    client.peerId.isEmpty
+                                                        ? '${translate("ID")}: ${translate("Root/Administrator")}'
+                                                        : '${translate("ID")}: ${client.peerId}',
+                                                    style: TextStyle(
+                                                        color: MyTheme
+                                                            .darkGray),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          _buildDisconnectButton(
+                                              client),
+                                        ],
+                                      ),
+                                      client.isFileTransfer
+                                          ? _buildNewConnectionHint(
+                                              client)
+                                          : client.type == ClientType.remote
+                                              ? client.inVoiceCall && client.incomingVoiceCall
+                                                  ? _buildNewVoiceCallHint(client)
+                                                  : const SizedBox.shrink()
+                                              : const SizedBox.shrink(),
+                                      const Divider(),
+                                    ],
+                                  ))
+                              .toList(),
+                        ),
+                );
+              },
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _buildDisconnectButton(Client client) {
+    return TextButton(
+      onPressed: () {
+        onDisconnect(client);
+      },
+      child: Text(
+        translate('Disconnect'),
+        style: TextStyle(
+          color: Colors.red,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNewConnectionHint(Client client) {
+    return Container(
+      margin: const EdgeInsets.only(top: 6, bottom: 3),
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      decoration: BoxDecoration(
+        color: MyTheme.accent50,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          ...serverModel.clients.map(
-            (client) => Column(
-              children: [
-                ClientInfo(client),
-                (client.authStatus == AuthStatus.Other ||
-                        client.authStatus == AuthStatus.Waiting)
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                              onPressed: () =>
-                                  serverModel.sendLoginResponse(client, false),
-                              child: Text(translate("Dismiss"))),
-                          TextButton(
-                              onPressed: () =>
-                                  serverModel.sendLoginResponse(client, true),
-                              child: Row(
-                                children: [
-                                  Text(translate("Accept")),
-                                  const SizedBox(width: 4),
-                                  const Icon(Icons.done, size: 18),
-                                ],
-                              ))
-                        ],
-                      )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          if (client.inVoiceCall)
-                            TextButton(
-                              onPressed: () {
-                                serverModel.closeVoiceCall();
-                              },
-                              child: Row(
-                                children: [
-                                  Text(translate("Close Voice Call")),
-                                  const SizedBox(width: 4),
-                                  const Icon(Icons.close, size: 18),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(width: 4),
-                          TextButton(
-                            onPressed: () {
-                              serverModel.sendDisconnect(client.id);
-                            },
-                            child: Row(
-                              children: [
-                                Text(translate("Disconnect")),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.link_off, size: 18),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                const Divider(),
-              ],
+          Padding(
+            padding: const EdgeInsets.only(right: 5),
+            child: Icon(Icons.info_outline,
+                color: MyTheme.accent, size: 16),
+          ),
+          Expanded(
+            child: Text(
+              translate("New Connection"),
+              style: TextStyle(
+                  fontSize: 12, color: MyTheme.accent50Reverse),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildNewVoiceCallHint(Client client) {
+    return Container(
+      margin: const EdgeInsets.only(top: 6, bottom: 3),
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      decoration: BoxDecoration(
+        color: isMobile ? MyTheme.accent50 : null,
+        border: Border.fromBorderSide(
+            BorderSide(color: MyTheme.accent, width: 1.5)),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              minimumSize: Size.zero,
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () async {
+              await onVoiceCallResponse(
+                  client, true, client.incomingVoiceCall);
+            },
+            icon: Icon(Icons.check, color: Colors.green),
+            label: Text(
+              translate("Accept"),
+              style: TextStyle(color: Colors.green),
+            ),
+          ),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              minimumSize: Size.zero,
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () async {
+              await onVoiceCallResponse(
+                  client, false, client.incomingVoiceCall);
+            },
+            icon: Icon(Icons.close, color: Colors.red),
+            label: Text(translate("Decline"),
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  onDisconnect(Client client) {
+    client.sendDisconnect();
+  }
+
+  onVoiceCallResponse(
+      Client client, bool accept, bool isIncoming) async {
+    if (accept) {
+      await handleVoiceCall(client, true, isIncoming);
+    } else {
+      await client.closeVoiceCall();
+    }
+  }
 }
 
 class PaddingCard extends StatelessWidget {
-  const PaddingCard({
-    Key? key,
-    required this.child,
-    this.title,
-    this.titleIcon,
-    this.titleTextStyle,
-  }) : super(key: key);
-
-  final String? title;
-  final Icon? titleIcon;
-  final TextStyle? titleTextStyle;
+  final String title;
+  final Widget? titleIcon;
   final Widget child;
+  final TextStyle? titleTextStyle;
+  final double titleIconSize;
+
+  PaddingCard({
+    Key? key,
+    required this.title,
+    this.titleIcon,
+    required this.child,
+    this.titleTextStyle,
+    this.titleIconSize = 20.0,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    var cardChild = child;
-    // 只有当标题不为空时才显示标题部分
-    if (title != null && title!.isNotEmpty) {
-      cardChild = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              // 恢复默认图标显示逻辑，让特定组件自己控制是否显示图标
-              if (titleIcon != null)
-                titleIcon!.marginOnly(right: 10)
-              else
-                const Icon(Icons.info, color: MyTheme.accent)
-                    .marginOnly(right: 10),
-              Expanded(
-                child: Text(
-                  title!,
-                  style: titleTextStyle ??
-                      Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontSize: 18, fontWeight: FontWeight.normal),
+    final theme = Theme.of(context);
+    final defaultTitleTextStyle = TextStyle(
+      color: theme.textTheme.titleLarge?.color,
+      fontWeight: FontWeight.bold,
+      fontSize: 18.0,
+    );
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 5.0),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题行，仅在有标题时显示
+            if (title.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Row(
+                  children: [
+                    // 标题图标，仅在提供图标时显示
+                    if (titleIcon != null) ...[
+                      SizedBox(
+                        width: titleIconSize,
+                        height: titleIconSize,
+                        child: titleIcon,
+                      ),
+                      SizedBox(width: 12.0),
+                    ],
+                    // 标题文本
+                    Text(
+                      title,
+                      style: titleTextStyle ?? defaultTitleTextStyle,
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ).marginOnly(bottom: 5),
-          child,
-        ],
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: const BorderRadius.all(Radius.circular(10.0)),
+            // 内容
+            child,
+          ],
+        ),
       ),
-      margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
-      padding: const EdgeInsets.all(12.0),
-      child: cardChild,
     );
   }
 }
@@ -873,4 +989,6 @@ void showScamWarning(BuildContext context, ServerModel serverModel) {
       return ScamWarningDialog(serverModel: serverModel);
     },
   );
+}
+
 }
