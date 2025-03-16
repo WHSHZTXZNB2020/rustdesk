@@ -560,7 +560,11 @@ class MyTheme {
   );
 
   static ThemeMode getThemeModePreference() {
-    return themeModeFromString(bind.mainGetLocalOption(key: kCommConfKeyTheme));
+    // 默认使用深色主题，忽略保存的设置
+    return ThemeMode.dark;
+    
+    // 原始代码 - 被注释
+    // return themeModeFromString(bind.mainGetLocalOption(key: kCommConfKeyTheme));
   }
 
   static Future<void> changeDarkMode(ThemeMode mode) async {
