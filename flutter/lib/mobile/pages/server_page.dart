@@ -480,12 +480,39 @@ class _ServerInfoState extends State<ServerInfo> {
   Future<void> _fetchDeviceSN() async {
     try {
       debugPrint("开始获取SN号...");
-      final sn = await gFFI.invokeMethod("get_device_sn");
-      debugPrint("获取到的SN号: $sn (${sn.runtimeType})");
+      // 尝试3次获取SN号
+      String? deviceSN;
+      int retryCount = 0;
+      
+      while (retryCount < 3) {
+        try {
+          final sn = await gFFI.invokeMethod("get_device_sn");
+          debugPrint("获取到的SN号: $sn (${sn?.runtimeType})");
+          
+          // 如果获取成功，跳出循环
+          if (sn != null && sn.toString().isNotEmpty && sn.toString() != "Unknown") {
+            deviceSN = sn.toString();
+            break;
+          }
+          
+          retryCount++;
+          if (retryCount < 3) {
+            debugPrint("SN号获取失败，3秒后重试...");
+            await Future.delayed(Duration(seconds: 3));
+          }
+        } catch (e) {
+          debugPrint("获取SN号出错: $e");
+          retryCount++;
+          if (retryCount < 3) {
+            debugPrint("3秒后重试...");
+            await Future.delayed(Duration(seconds: 3));
+          }
+        }
+      }
       
       if (mounted) {
         setState(() {
-          _deviceSN = sn != null ? sn.toString() : "Unknown";
+          _deviceSN = deviceSN ?? "Unknown";
           debugPrint("设置SN号为: $_deviceSN");
         });
       }
