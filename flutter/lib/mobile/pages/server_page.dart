@@ -7,6 +7,8 @@ import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../common.dart';
 import '../../common/widgets/dialog.dart';
@@ -423,6 +425,11 @@ class _ServerInfoState extends State<ServerInfo> {
     const TextStyle textStyleValue =
         TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold);
 
+    void copyToClipboard(String value) {
+      Clipboard.setData(ClipboardData(text: value));
+      showToast(translate('Copied'));
+    }
+
     Widget ConnectionStateNotification() {
       if (serverModel.connectStatus == -1) {
         return Row(children: [
@@ -451,6 +458,9 @@ class _ServerInfoState extends State<ServerInfo> {
         ? translate('本机商米SN') // 有SN时显示"本机商米SN"
         : translate('你的设备'); // 无SN时显示"你的设备"
 
+    final showOneTime = serverModel.approveMode != 'click' &&
+        serverModel.verificationMethod != kUsePermanentPassword;
+
     return PaddingCard(
       title: cardTitle,
       titleIcon: null, // 移除标题图标
@@ -461,42 +471,69 @@ class _ServerInfoState extends State<ServerInfo> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 首先显示SN号（如果有）- 调整与标题的间隙
+          // 首先显示SN号（如果有）
           if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
             Padding(
-              padding: EdgeInsets.only(top: 2.0), // 减小与标题的间隔为2.0
+              padding: EdgeInsets.only(bottom: 10.0), // 与下方ID部分的间隔
               child: Text(
                 _deviceSN,
-                style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // 设置SN字体大小为25px
+                style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // SN字体大小为25px
               ),
             ),
           
-          SizedBox(height: 15),
-          
-          // ID部分（保留图标）
+          // ID
           Row(children: [
-            Image.asset('assets/ID.svg', width: iconSize, height: iconSize),
-            SizedBox(width: 8),
+            const Icon(Icons.perm_identity,
+                    color: Colors.grey, size: iconSize)
+                .marginOnly(right: iconMarginRight),
             Text(
               translate('ID'),
               style: textStyleHeading,
             )
           ]),
-          SizedBox(height: 5),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  serverModel.serverId.text.isEmpty ? 'loading...' : serverModel.serverId.text,
-                  style: textStyleValue,
-                ),
-              ),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(
+              model.serverId.value.text,
+              style: textStyleValue,
+            ),
+            IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.copy_outlined),
+                onPressed: () {
+                  copyToClipboard(model.serverId.value.text.trim());
+                })
+          ]).marginOnly(left: 39, bottom: 10), // 保持左侧缩进39，确保与ID对齐
           
-          SizedBox(height: 15),
-          
-          // 连接状态
+          // Password
+          Row(children: [
+            const Icon(Icons.lock_outline, color: Colors.grey, size: iconSize)
+                .marginOnly(right: iconMarginRight),
+            Text(
+              translate('One-time Password'),
+              style: textStyleHeading,
+            )
+          ]),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(
+              !showOneTime ? '-' : model.serverPasswd.value.text,
+              style: textStyleValue,
+            ),
+            !showOneTime
+                ? SizedBox.shrink()
+                : Row(children: [
+                    IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.refresh),
+                        onPressed: () => bind.mainUpdateTemporaryPassword()),
+                    IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.copy_outlined),
+                        onPressed: () {
+                          copyToClipboard(
+                              model.serverPasswd.value.text.trim());
+                        })
+                  ])
+          ]).marginOnly(left: 40, bottom: 15), // 保持左侧缩进40
           ConnectionStateNotification()
         ],
       ),
@@ -879,16 +916,19 @@ class PaddingCard extends StatelessWidget {
     );
 
     return Card(
-      margin: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 5.0),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(13),
+      ),
+      margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 0), // 恢复原始上方间隙10.0
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.symmetric(vertical: 15.0, horizontal: 20.0), // 恢复原始内边距
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 标题行，仅在有标题时显示
             if (title.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12.0, left: 5.0),
+                padding: const EdgeInsets.fromLTRB(0, 5, 0, 8), // 恢复原始标题内边距
                 child: Row(
                   children: [
                     // 标题图标，仅在提供图标时显示
@@ -898,7 +938,7 @@ class PaddingCard extends StatelessWidget {
                         height: titleIconSize,
                         child: titleIcon,
                       ),
-                      SizedBox(width: 12.0),
+                      SizedBox(width: 10.0), // 使用原始间距
                     ],
                     // 标题文本
                     Text(
@@ -908,11 +948,8 @@ class PaddingCard extends StatelessWidget {
                   ],
                 ),
               ),
-            // 内容，增加左侧内边距使整体向右移动
-            Padding(
-              padding: const EdgeInsets.only(left: 15.0),
-              child: child,
-            ),
+            // 内容
+            child,
           ],
         ),
       ),
