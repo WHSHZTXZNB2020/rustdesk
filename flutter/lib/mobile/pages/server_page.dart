@@ -458,25 +458,28 @@ class _ServerInfoState extends State<ServerInfo> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 首先显示SN号（如果有）
+          // 首先显示SN号（如果有）- 减小与标题的间隙
           if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
-            Text(
-              _deviceSN,
-              style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // 设置SN字体大小为25px
+            Padding(
+              padding: EdgeInsets.only(top: 5.0), // 减小与标题的间隔
+              child: Text(
+                _deviceSN,
+                style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // 设置SN字体大小为25px
+              ),
             ),
           
-          const SizedBox(height: 15),
+          SizedBox(height: 15),
           
-          // 然后显示ID部分（保留图标）
+          // ID部分（保留图标）
           Row(children: [
             Image.asset('assets/ID.svg', width: iconSize, height: iconSize),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             Text(
               translate('ID'),
               style: textStyleHeading,
             )
           ]),
-          const SizedBox(height: 5),
+          SizedBox(height: 5),
           Row(
             children: [
               Expanded(
@@ -488,7 +491,7 @@ class _ServerInfoState extends State<ServerInfo> {
             ],
           ),
           
-          const SizedBox(height: 15),
+          SizedBox(height: 15),
           
           // 连接状态
           ConnectionStateNotification()
@@ -614,13 +617,15 @@ class _PermissionCheckerState extends State<PermissionChecker> {
   @override
   Widget build(BuildContext context) {
     return Consumer<ServerModel>(builder: (context, model, child) {
+      final hasAudioPermission = androidVersion >= 30;
+      
       return PaddingCard(
         title: translate("权限"),
         titleIcon: null, // 移除权限标题图标
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 只显示停止服务按钮
+            // 显示停止服务按钮
             if (model.isStart)
               ElevatedButton(
                 style: ButtonStyle(
@@ -637,6 +642,43 @@ class _PermissionCheckerState extends State<PermissionChecker> {
                   ),
                 ),
               ),
+              
+            // 文件传输开关
+            SwitchListTile(
+              visualDensity: VisualDensity.compact,
+              contentPadding: EdgeInsets.all(0),
+              title: Text(translate("Transfer file")),
+              value: model.fileOk,
+              onChanged: (_) => model.toggleFile(),
+            ),
+            
+            // 音频捕获开关（仅在Android 10及以上版本显示）
+            hasAudioPermission
+              ? SwitchListTile(
+                  visualDensity: VisualDensity.compact,
+                  contentPadding: EdgeInsets.all(0),
+                  title: Text(translate("Audio Capture")),
+                  value: model.audioOk,
+                  onChanged: (_) => model.toggleAudio(),
+                )
+              : Row(children: [
+                  Icon(Icons.info_outline).marginOnly(right: 15),
+                  Expanded(
+                    child: Text(
+                      translate("android_version_audio_tip"),
+                      style: const TextStyle(color: MyTheme.darkGray),
+                    )
+                  )
+                ]),
+                
+            // 剪贴板开关
+            SwitchListTile(
+              visualDensity: VisualDensity.compact,
+              contentPadding: EdgeInsets.all(0),
+              title: Text(translate("Enable clipboard")),
+              value: model.clipboardOk,
+              onChanged: (_) => model.toggleClipboard(),
+            ),
           ],
         ),
       );
