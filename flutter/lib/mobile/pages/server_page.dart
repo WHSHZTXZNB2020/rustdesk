@@ -23,138 +23,12 @@ class ServerPage extends StatefulWidget implements PageShape {
   final icon = const Icon(Icons.mobile_screen_share);
 
   @override
-  final appBarActions = (!bind.isDisableSettings() &&
-          bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) != 'Y')
-      ? [_DropDownAction()]
-      : [];
+  final appBarActions = <Widget>[];
 
   ServerPage({Key? key}) : super(key: key);
 
   @override
   State<StatefulWidget> createState() => _ServerPageState();
-}
-
-class _DropDownAction extends StatelessWidget {
-  _DropDownAction();
-
-  // should only have one action
-  final actions = [
-    PopupMenuButton<String>(
-        tooltip: "",
-        icon: const Icon(Icons.more_vert),
-        itemBuilder: (context) {
-          listTile(String text, bool checked) {
-            return ListTile(
-                title: Text(translate(text)),
-                trailing: Icon(
-                  Icons.check,
-                  color: checked ? null : Colors.transparent,
-                ));
-          }
-
-          final approveMode = gFFI.serverModel.approveMode;
-          final verificationMethod = gFFI.serverModel.verificationMethod;
-          final showPasswordOption = approveMode != 'click';
-          final isApproveModeFixed = isOptionFixed(kOptionApproveMode);
-          return [
-            PopupMenuItem(
-              enabled: gFFI.serverModel.connectStatus > 0,
-              value: "changeID",
-              child: Text(translate("Change ID")),
-            ),
-            const PopupMenuDivider(),
-            PopupMenuItem(
-              value: 'AcceptSessionsViaPassword',
-              child: listTile(
-                  'Accept sessions via password', approveMode == 'password'),
-              enabled: !isApproveModeFixed,
-            ),
-            PopupMenuItem(
-              value: 'AcceptSessionsViaClick',
-              child:
-                  listTile('Accept sessions via click', approveMode == 'click'),
-              enabled: !isApproveModeFixed,
-            ),
-            PopupMenuItem(
-              value: "AcceptSessionsViaBoth",
-              child: listTile("Accept sessions via both",
-                  approveMode != 'password' && approveMode != 'click'),
-              enabled: !isApproveModeFixed,
-            ),
-            if (showPasswordOption) const PopupMenuDivider(),
-            if (showPasswordOption &&
-                verificationMethod != kUseTemporaryPassword)
-              PopupMenuItem(
-                value: "setPermanentPassword",
-                child: Text(translate("Set permanent password")),
-              ),
-            if (showPasswordOption &&
-                verificationMethod != kUsePermanentPassword)
-              PopupMenuItem(
-                value: "setTemporaryPasswordLength",
-                child: Text(translate("One-time password length")),
-              ),
-            if (showPasswordOption) const PopupMenuDivider(),
-            if (showPasswordOption)
-              PopupMenuItem(
-                value: kUseTemporaryPassword,
-                child: listTile('Use one-time password',
-                    verificationMethod == kUseTemporaryPassword),
-              ),
-            if (showPasswordOption)
-              PopupMenuItem(
-                value: kUsePermanentPassword,
-                child: listTile('Use permanent password',
-                    verificationMethod == kUsePermanentPassword),
-              ),
-            if (showPasswordOption)
-              PopupMenuItem(
-                value: kUseBothPasswords,
-                child: listTile(
-                    'Use both passwords',
-                    verificationMethod != kUseTemporaryPassword &&
-                        verificationMethod != kUsePermanentPassword),
-              ),
-          ];
-        },
-        onSelected: (value) async {
-          if (value == "changeID") {
-            changeIdDialog();
-          } else if (value == "setPermanentPassword") {
-            setPasswordDialog();
-          } else if (value == "setTemporaryPasswordLength") {
-            setTemporaryPasswordLengthDialog(gFFI.dialogManager);
-          } else if (value == kUsePermanentPassword ||
-              value == kUseTemporaryPassword ||
-              value == kUseBothPasswords) {
-            callback() {
-              bind.mainSetOption(key: kOptionVerificationMethod, value: value);
-              gFFI.serverModel.updatePasswordModel();
-            }
-
-            if (value == kUsePermanentPassword &&
-                (await bind.mainGetPermanentPassword()).isEmpty) {
-              setPasswordDialog(notEmptyCallback: callback);
-            } else {
-              callback();
-            }
-          } else if (value.startsWith("AcceptSessionsVia")) {
-            value = value.substring("AcceptSessionsVia".length);
-            if (value == "Password") {
-              gFFI.serverModel.setApproveMode('password');
-            } else if (value == "Click") {
-              gFFI.serverModel.setApproveMode('click');
-            } else {
-              gFFI.serverModel.setApproveMode(defaultOptionApproveMode);
-            }
-          }
-        })
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return actions[0];
-  }
 }
 
 class _ServerPageState extends State<ServerPage> {
@@ -467,40 +341,71 @@ class ServerInfo extends StatefulWidget {
 
 class _ServerInfoState extends State<ServerInfo> {
   final model = gFFI.serverModel;
-  String _deviceSN = "获取中...";
+  String _deviceSN = ""; // 初始为空，不显示"获取中..."
   bool _hasFetchedSN = false;
+  
+  static const String snPrefKey = "device_sn"; // 用于存储SN的键名
 
   @override
   void initState() {
     super.initState();
-    // 直接请求SN，不需要另外设置监听器
-    _requestDeviceSN();
+    // 先尝试从本地存储读取SN
+    _loadSavedSN();
   }
   
+  /// 从本地存储加载保存的SN
+  Future<void> _loadSavedSN() async {
+    try {
+      final sn = await bind.mainGetLocalOption(key: snPrefKey);
+      if (sn.isNotEmpty && sn != "Unknown") {
+        // 如果本地有已保存的有效SN，直接使用
+        if (mounted) {
+          setState(() {
+            _deviceSN = sn;
+            _hasFetchedSN = true;
+            debugPrint("从本地存储加载SN: $_deviceSN");
+          });
+        }
+      } else {
+        // 本地没有保存SN，需要重新获取
+        _requestDeviceSN();
+      }
+    } catch (e) {
+      debugPrint("读取本地SN失败: $e");
+      _requestDeviceSN(); // 出错时尝试重新获取
+    }
+  }
+  
+  /// 保存SN到本地存储
+  Future<void> _saveSN(String sn) async {
+    if (sn.isNotEmpty && sn != "Unknown") {
+      try {
+        await bind.mainSetLocalOption(key: snPrefKey, value: sn);
+        debugPrint("SN保存到本地: $sn");
+      } catch (e) {
+        debugPrint("保存SN失败: $e");
+      }
+    }
+  }
+
   /// 主动请求设备SN号
   Future<void> _requestDeviceSN() async {
     if (_hasFetchedSN) return;
     
-    debugPrint("==== SunmiSN调试 ==== 主动请求SN号...");
+    debugPrint("请求SN号...");
     try {
-      // 确保全局监听器已初始化
-      if (!_methodHandlerInitialized) {
-        androidChannelInit();
-        _methodHandlerInitialized = true;
-      }
-      
       // 请求获取SN
       await gFFI.invokeMethod("get_device_sn");
-      // 请求已发送，等待回调更新UI
+      // SN将通过on_sn_received事件回调更新
     } catch (e) {
-      debugPrint("==== SunmiSN调试 ==== 请求SN异常: $e");
+      debugPrint("请求SN异常: $e");
       setState(() {
         _deviceSN = "Unknown";
         _hasFetchedSN = true;
       });
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
@@ -537,19 +442,27 @@ class _ServerInfoState extends State<ServerInfo> {
       }
     }
 
+    // 根据SN获取状态决定标题内容
+    String cardTitle = translate('本机商米SN'); // 默认显示"本机商米SN"
+    if (_hasFetchedSN && (_deviceSN.isEmpty || _deviceSN == "Unknown")) {
+      cardTitle = translate('你的设备'); // 仅在获取失败时显示"你的设备"
+    }
+
     return PaddingCard(
-        title: translate('本机商米SN'),
+        title: cardTitle, // 动态设置标题，可能为空
+        titleTextStyle: const TextStyle(fontSize: 14.0, fontWeight: FontWeight.bold),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // SN号直接显示在标题下方，与标题对齐
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Text(
-                _deviceSN,
-                style: const TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+            // SN号显示在标题下方，仅当有SN时显示
+            if (_deviceSN.isNotEmpty && _deviceSN != "Unknown")
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Text(
+                  _deviceSN,
+                  style: const TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
             
             // ID
             Row(children: [
@@ -569,21 +482,17 @@ class _ServerInfoState extends State<ServerInfo> {
                     style: textStyleValue,
                   ),
                 ),
-                // ID的复制按钮已移除
               ],
             ).marginOnly(left: 39, bottom: 15),
             
-            // 连接状态（保留）
+            // 连接状态
             ConnectionStateNotification()
           ],
         ));
   }
 }
 
-// 标记方法处理器是否已初始化
-bool _methodHandlerInitialized = false;
-
-// 将androidChannelInit声明为顶级公开函数
+// 恢复原有的androidChannelInit函数，添加SN处理功能
 void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
     debugPrint("flutter got android msg: $method, $arguments");
@@ -591,14 +500,14 @@ void androidChannelInit() {
       // 处理SN接收
       if (method == "on_sn_received" && arguments is Map) {
         final sn = arguments["sn"] as String?;
-        debugPrint("==== SunmiSN调试 ==== 收到Android发送的SN: '$sn'");
+        debugPrint("收到设备SN: '$sn'");
         if (sn != null && sn.isNotEmpty && sn != "Unknown") {
           updateServerInfoSN(sn);
         }
         return "";
       }
       
-      // 处理其他系统事件
+      // 处理原有事件
       switch (method) {
         case "start_capture":
           {
@@ -654,15 +563,25 @@ void androidChannelInit() {
 
 // 更新所有ServerInfo实例的SN
 void updateServerInfoSN(String sn) {
+  if (sn.isEmpty || sn == "Unknown") return;
+  
+  // 保存SN到本地存储
+  try {
+    bind.mainSetLocalOption(key: _ServerInfoState.snPrefKey, value: sn);
+    debugPrint("SN自动保存到本地存储: $sn");
+  } catch (e) {
+    debugPrint("保存SN到本地存储失败: $e");
+  }
+  
   // 遍历所有Element查找ServerInfo组件
   void visitor(Element element) {
     if (element is StatefulElement && element.state is _ServerInfoState) {
       final state = element.state as _ServerInfoState;
-      if (!state._hasFetchedSN) {
+      if (!state._hasFetchedSN || state._deviceSN.isEmpty) {
         state.setState(() {
           state._deviceSN = sn;
           state._hasFetchedSN = true;
-          debugPrint("==== SunmiSN调试 ==== 更新UI中的SN为: '$sn'");
+          debugPrint("更新UI中的SN为: '$sn'");
         });
       }
     }
@@ -911,49 +830,60 @@ class ConnectionManager extends StatelessWidget {
 }
 
 class PaddingCard extends StatelessWidget {
-  const PaddingCard({Key? key, required this.child, this.title, this.titleIcon})
-      : super(key: key);
+  const PaddingCard({
+    Key? key,
+    required this.child,
+    this.title,
+    this.titleIcon,
+    this.titleTextStyle,
+  }) : super(key: key);
 
   final String? title;
   final Icon? titleIcon;
+  final TextStyle? titleTextStyle;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final children = [child];
-    if (title != null) {
-      children.insert(
-          0,
-          Padding(
-              padding: const EdgeInsets.fromLTRB(0, 5, 0, 8),
-              child: Row(
-                children: [
-                  titleIcon?.marginOnly(right: 10) ?? const SizedBox.shrink(),
-                  Expanded(
-                    child: Text(title!,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.merge(TextStyle(fontWeight: FontWeight.bold))),
-                  )
-                ],
-              )));
+    var cardChild = child;
+    // 只有当标题不为空时才显示标题部分
+    if (title != null && title!.isNotEmpty) {
+      cardChild = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (titleIcon != null)
+                titleIcon!.marginOnly(right: 10)
+              else
+                const Icon(Icons.info, color: MyTheme.accent)
+                    .marginOnly(right: 10),
+              Expanded(
+                child: Text(
+                  title!,
+                  style: titleTextStyle ??
+                      Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontSize: 18, fontWeight: FontWeight.normal),
+                ),
+              ),
+            ],
+          ).marginOnly(bottom: 5),
+          child,
+        ],
+      );
     }
-    return SizedBox(
-        width: double.maxFinite,
-        child: Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(13),
-          ),
-          margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 0),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(vertical: 15.0, horizontal: 20.0),
-            child: Column(
-              children: children,
-            ),
-          ),
-        ));
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: const BorderRadius.all(Radius.circular(10.0)),
+      ),
+      margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
+      padding: const EdgeInsets.all(12.0),
+      child: cardChild,
+    );
   }
 }
 
