@@ -482,7 +482,7 @@ class _ServerInfoState extends State<ServerInfo> {
       final sn = await gFFI.invokeMethod("get_device_sn");
       if (mounted) {
         setState(() {
-          _deviceSN = sn ?? "Unknown";
+          _deviceSN = sn != null ? sn.toString() : "Unknown";
         });
       }
     } catch (e) {
