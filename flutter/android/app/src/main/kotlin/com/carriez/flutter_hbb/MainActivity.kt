@@ -471,7 +471,10 @@ class MainActivity : FlutterActivity() {
                         Log.d("SunmiSN", "Flutter请求获取SN号")
                         val sn = getDeviceSN(this)
                         Log.d("SunmiSN", "向Flutter返回SN: '$sn'")
-                        result.success(sn)
+                        // 返回一个Map而不是直接返回字符串
+                        val resultMap = HashMap<String, String>()
+                        resultMap["sn"] = sn
+                        result.success(resultMap)
                     } catch (e: Exception) {
                         Log.e("SunmiSN", "获取SN号失败: ${e.message}")
                         result.error("SN_ERROR", "获取SN号失败", e.toString())
