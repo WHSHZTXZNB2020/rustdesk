@@ -34,6 +34,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -46,6 +48,7 @@ class MainActivity : FlutterActivity() {
         const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
         const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
         const val PERMISSION_ACCESS_SURFACE_FLINGER = "android.permission.ACCESS_SURFACE_FLINGER"
+        const val READ_PHONE_STATE = "android.permission.READ_PHONE_STATE"
     }
 
     private val channelTag = "mChannel"
@@ -465,9 +468,35 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_device_sn" -> {
                     // 获取设备SN号
-                    val sn = getDeviceSN()
-                    Log.d("SunmiSN", "获取到的SN号: $sn")
-                    result.success(sn)
+                    // 先检查是否有READ_PHONE_STATE权限
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                        !XXPermissions.isGranted(activity, READ_PHONE_STATE)) {
+                        // 没有权限，尝试请求
+                        Log.d("SunmiSN", "需要请求READ_PHONE_STATE权限")
+                        XXPermissions.with(activity)
+                            .permission(READ_PHONE_STATE)
+                            .request { _, granted ->
+                                if (granted) {
+                                    // 请求成功，获取SN
+                                    val sn = getDeviceSN()
+                                    Log.d("SunmiSN", "请求权限成功，获取到的SN号: $sn")
+                                    Handler(Looper.getMainLooper()).post {
+                                        result.success(sn)
+                                    }
+                                } else {
+                                    // 请求失败
+                                    Log.e("SunmiSN", "READ_PHONE_STATE权限被拒绝")
+                                    Handler(Looper.getMainLooper()).post {
+                                        result.success("Unknown")
+                                    }
+                                }
+                            }
+                    } else {
+                        // 已有权限或不需要权限(Android 6.0以下)，直接获取SN
+                        val sn = getDeviceSN()
+                        Log.d("SunmiSN", "已有权限，获取到的SN号: $sn")
+                        result.success(sn)
+                    }
                 }
                 else -> {
                     result.error("-1", "No such method", null)
