@@ -1,0 +1,80 @@
+name: Android Build
+
+# 手动触发
+on:
+  workflow_dispatch:
+
+env:
+  # 环境变量
+  RUST_VERSION: "1.75"          # Rust 版本
+  NDK_VERSION: "r27c"           # Android NDK 版本
+  FLUTTER_VERSION: "3.24.5"     # Flutter 版本
+  ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"  # Android 签名密钥
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest      # 使用 Ubuntu 最新版本作为构建环境
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive  # 递归检出子模块
+
+      # 2. 设置 JDK
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'  # 使用 Temurin JDK
+          java-version: '17'       # JDK 版本
+
+      # 3. 设置 Flutter
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'        # 使用稳定版 Flutter
+          flutter-version: ${{ env.FLUTTER_VERSION }}  # 指定 Flutter 版本
+
+      # 4. 设置 Android NDK
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}  # 指定 NDK 版本
+          add-to-path: true                    # 将 NDK 添加到 PATH
+
+      # 5. 安装 Rust 工具链
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}  # 指定 Rust 版本
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android  # 目标架构
+          components: rustfmt                 # 安装 rustfmt
+
+      # 6. 构建 Rust 库
+      - name: Build Rust library
+        run: |
+          # 添加 Android 目标架构
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          # 安装 cargo-ndk
+          cargo install cargo-ndk --version 3.1.2 --locked
+          # 构建 ARM64 库
+          ./flutter/ndk_arm64.sh
+          # 构建 ARMv7 库
+          ./flutter/ndk_arm.sh
+          # 构建 x86_64 库
+          ./flutter/ndk_x64.sh
+
+      # 7. 构建 Android APK
+      - name: Build Android APK
+        run: |
+          pushd flutter
+          # 使用 Flutter 构建 APK
+          flutter build apk --release --target-platform android-arm64,android-arm,android-x64
+          popd
+
+      # 8. 上传 APK 作为 Artifact
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: rustdesk-android-apk  # Artifact 名称
+          path: flutter/build/app/outputs/flutter-apk/app-release.apk  # APK 文件路径
