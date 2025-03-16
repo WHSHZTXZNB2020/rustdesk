@@ -1,710 +1,655 @@
 package com.carriez.flutter_hbb
 
 /**
- * Handle remote input and dispatch android gesture
+ * Handle events from flutter
+ * Request system permissions for screen capturing
  *
- * Modified to use INJECT_EVENTS permission instead of AccessibilityService
+ * Inspired by [droidVNC-NG] https://github.com/bk138/droidVNC-NG
  */
 
-import android.app.Service
+import ffi.FFI
+
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Path
+import android.content.ServiceConnection
+import android.content.ClipboardManager
+import android.os.Bundle
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
-import android.view.InputDevice
-import android.view.InputEvent
-import android.view.KeyEvent as KeyEventAndroid
-import android.view.MotionEvent
-import android.view.ViewConfiguration
-import android.hardware.input.InputManager
-import android.media.AudioManager
-import android.view.KeyCharacterMap
+import android.view.WindowManager
+import android.media.MediaCodecInfo
+import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+import android.media.MediaCodecList
+import android.media.MediaFormat
+import android.util.DisplayMetrics
 import androidx.annotation.RequiresApi
-import java.util.*
-import java.lang.Character
-import kotlin.math.abs
-import kotlin.math.max
-import hbb.MessageOuterClass.KeyEvent
-import hbb.MessageOuterClass.KeyboardMode
+import org.json.JSONArray
+import org.json.JSONObject
+import com.hjq.permissions.XXPermissions
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
-import java.lang.reflect.Method
+import android.content.pm.PackageManager
 
-// const val BUTTON_UP = 2
-// const val BUTTON_BACK = 0x08
-
-const val LEFT_DOWN = 9
-const val LEFT_MOVE = 8
-const val LEFT_UP = 10
-const val RIGHT_UP = 18
-// (BUTTON_BACK << 3) | BUTTON_UP
-const val BACK_UP = 66
-const val WHEEL_BUTTON_DOWN = 33
-const val WHEEL_BUTTON_UP = 34
-const val WHEEL_DOWN = 523331
-const val WHEEL_UP = 963
-
-const val TOUCH_SCALE_START = 1
-const val TOUCH_SCALE = 2
-const val TOUCH_SCALE_END = 3
-const val TOUCH_PAN_START = 4
-const val TOUCH_PAN_UPDATE = 5
-const val TOUCH_PAN_END = 6
-
-const val WHEEL_STEP = 120
-const val WHEEL_DURATION = 50L
-const val LONG_TAP_DELAY = 200L
-
-// 定义InputManager的常量，以防止编译错误
-private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
-
-// 定义KeyboardMode的常量
-private val LEGACY_MODE = KeyboardMode.Legacy.number
-private val TRANSLATE_MODE = KeyboardMode.Translate.number
-private val MAP_MODE = KeyboardMode.Map.number
-
-// InputService类用于处理输入事件
-class InputService : Service {
-
+class MainActivity : FlutterActivity() {
     companion object {
-        var ctx: InputService? = null
-        val isOpen: Boolean
-            get() = ctx != null
-    }
-
-    private val logTag = "input service"
-    private var leftIsDown = false
-    private val touchPath = Path()
-    private var lastTouchGestureStartTime = 0L
-    private var mouseX = 0
-    private var mouseY = 0
-    private var timer = Timer()
-    private var recentActionTask: TimerTask? = null
-    // 100(tap timeout) + 400(long press timeout)
-    private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout().toLong()
-
-    private var isWaitingLongPress = false
-    
-    // 追踪事件状态，避免重复注入
-    private var lastActionType = -1
-    private var lastEventTime = 0L
-    private var pendingEventRetry = false
-
-    private var lastX = 0
-    private var lastY = 0
-
-    private lateinit var volumeController: VolumeController
-    private var inputManager: InputManager? = null
-    private lateinit var appContext: Context
-    private lateinit var handler: Handler
-    
-    // 事件处理状态
-    private var lastDownTime = 0L   // 上次DOWN事件的时间戳
-    
-    // 提供公开的无参构造函数
-    constructor() : super() {
-        Log.d(logTag, "InputService created with default constructor")
-    }
-    
-    // 提供带Context参数的公开构造函数
-    constructor(context: Context) : super() {
-        Log.d(logTag, "InputService created with context constructor")
-        initializeWithContext(context)
-    }
-    
-    override fun onCreate() {
-        super.onCreate()
-        Log.d(logTag, "InputService onCreate called")
+        var flutterMethodChannel: MethodChannel? = null
+        private var _rdClipboardManager: RdClipboardManager? = null
+        val rdClipboardManager: RdClipboardManager?
+            get() = _rdClipboardManager;
         
-        // 如果还未初始化，则使用applicationContext初始化
-        if (!::appContext.isInitialized) {
-            initializeWithContext(applicationContext)
+        // 系统级权限常量字符串
+        const val PERMISSION_CAPTURE_VIDEO_OUTPUT = "android.permission.CAPTURE_VIDEO_OUTPUT"
+        const val PERMISSION_READ_FRAME_BUFFER = "android.permission.READ_FRAME_BUFFER"
+        const val PERMISSION_ACCESS_SURFACE_FLINGER = "android.permission.ACCESS_SURFACE_FLINGER"
+    }
+
+    private val channelTag = "mChannel"
+    private val logTag = "mMainActivity"
+    private var mainService: MainService? = null
+
+    private var isAudioStart = false
+    private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        if (MainService.isReady) {
+            Intent(activity, MainService::class.java).also {
+                bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
+            }
+        }
+        flutterMethodChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            channelTag
+        )
+        initFlutterChannel(flutterMethodChannel!!)
+        thread { setCodecInfo() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val inputPer = InputService.isOpen
+        activity.runOnUiThread {
+            flutterMethodChannel?.invokeMethod(
+                "on_state_changed",
+                mapOf("name" to "input", "value" to inputPer.toString())
+            )
         }
     }
 
-    private fun initializeWithContext(context: Context) {
-        ctx = this
-        appContext = context.applicationContext
-        handler = Handler(Looper.getMainLooper())
-        volumeController = VolumeController(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-        inputManager = context.getSystemService(Context.INPUT_SERVICE) as? InputManager
-        Log.d(logTag, "InputService initialized with INJECT_EVENTS permission")
+    // 检查系统级权限，替代MediaProjection请求
+    private fun checkSystemPermissions(): Boolean {
+        // 优先检查 ACCESS_SURFACE_FLINGER 权限
+        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        
+        // 然后检查其他权限
+        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
+        val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
+                                readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
+        
+        // 返回结果，只要有一种方式能用就可以
+        return hasSurfaceFlingerPermission || hasOtherPermissions
+    }
+    
+    // 移除不再需要的requestMediaProjection方法
+    // private fun requestMediaProjection() {
+    //     val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
+    //         action = ACT_REQUEST_MEDIA_PROJECTION
+    //     }
+    //     startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
+    // }
+
+    // 修改onActivityResult，移除MediaProjection相关处理
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        // 系统级权限不需要ActivityResult处理
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        // 我们不需要绑定，所以返回null
-        return null
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (_rdClipboardManager == null) {
+            _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            FFI.setClipboardManager(_rdClipboardManager!!)
+        }
+        
+        // 应用启动时检查系统级权限状态并通知Flutter端
+        if (checkSystemPermissions()) {
+            Log.d(logTag, "系统级权限已预授权")
+            
+            // 检查是否有ACCESS_SURFACE_FLINGER权限
+            val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+            val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+            
+            if (hasSurfaceFlingerPermission) {
+                // 使用自定义Toast显示"已就绪"提示
+                try {
+                    ToastUtils.showReadyToast(this)
+                } catch (e: Exception) {
+                    // 如果自定义Toast失败，回退到标准Toast
+                    val toast = android.widget.Toast.makeText(
+                        this,
+                        "已就绪",
+                        android.widget.Toast.LENGTH_SHORT
+                    )
+                    toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+                    toast.show()
+                }
+            }
+            
+            flutterMethodChannel?.invokeMethod(
+                "on_state_changed",
+                mapOf("name" to "media", "value" to "true")
+            )
+        } else {
+            Log.d(logTag, "系统级权限未授权")
+        }
     }
 
     override fun onDestroy() {
+        Log.e(logTag, "onDestroy")
+        mainService?.let {
+            unbindService(serviceConnection)
+        }
         super.onDestroy()
-        disableSelf()
     }
 
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onMouseInput(mask: Int, _x: Int, _y: Int) {
-        val x = max(0, _x)
-        val y = max(0, _y)
-
-        // 添加事件日志，便于调试
-        Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
-
-        if (mask == 0 || mask == LEFT_MOVE) {
-            val oldX = mouseX
-            val oldY = mouseY
-            mouseX = x * SCREEN_INFO.scale
-            mouseY = y * SCREEN_INFO.scale
-            if (isWaitingLongPress) {
-                val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
-                if (delta > 8) {
-                    isWaitingLongPress = false
-                }
-            }
-            
-            // Move mouse pointer
-            injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            Log.d(logTag, "onServiceConnected")
+            val binder = service as MainService.LocalBinder
+            mainService = binder.getService()
         }
 
-        // left button down, was up
-        if (mask == LEFT_DOWN) {
-            // 防止短时间内重复触发DOWN事件
-            if (lastActionType == MotionEvent.ACTION_DOWN && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
-                Log.d(logTag, "跳过重复的LEFT_DOWN事件")
-                return
-            }
-            
-            isWaitingLongPress = true
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    if (isWaitingLongPress) {
-                        isWaitingLongPress = false
-                        // Long press
-                        injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat(), true)
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Log.d(logTag, "onServiceDisconnected")
+            mainService = null
+        }
+    }
+
+    // 修改initFlutterChannel方法中处理MediaProjection的部分
+    private fun initFlutterChannel(flutterMethodChannel: MethodChannel) {
+        flutterMethodChannel.setMethodCallHandler { method, result ->
+            when (method.method) {
+                "init_service" -> {
+                    if (MainService.isReady) {
+                        result.success(false)
+                        return@setMethodCallHandler
                     }
-                }
-            }, longPressDuration)
-
-            leftIsDown = true
-            // Touch down
-            injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat())
-            return
-        }
-
-        // left down, was down
-        if (leftIsDown) {
-            // Continue touch/drag
-            injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
-        }
-
-        // left up, was down
-        if (mask == LEFT_UP) {
-            // 防止短时间内重复触发UP事件
-            if (lastActionType == MotionEvent.ACTION_UP && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
-                Log.d(logTag, "跳过重复的LEFT_UP事件")
-                return
-            }
-            
-            if (leftIsDown) {
-                leftIsDown = false
-                isWaitingLongPress = false
-                // Touch up
-                injectMotionEvent(MotionEvent.ACTION_UP, mouseX.toFloat(), mouseY.toFloat())
-                return
-            }
-        }
-
-        if (mask == RIGHT_UP) {
-            // Right click - simulate long press
-            injectLongPress(mouseX.toFloat(), mouseY.toFloat())
-            return
-        }
-
-        if (mask == BACK_UP) {
-            // Back button
-            injectKeyEvent(KeyEventAndroid.KEYCODE_BACK)
-            return
-        }
-
-        // wheel button actions
-        if (mask == WHEEL_BUTTON_DOWN) {
-            timer.purge()
-            recentActionTask = object : TimerTask() {
-                override fun run() {
-                    // Recent apps
-                    injectKeyEvent(KeyEventAndroid.KEYCODE_APP_SWITCH)
-                    recentActionTask = null
-                }
-            }
-            timer.schedule(recentActionTask, LONG_TAP_DELAY)
-        }
-
-        if (mask == WHEEL_BUTTON_UP) {
-            if (recentActionTask != null) {
-                recentActionTask!!.cancel()
-                // Home button
-                injectKeyEvent(KeyEventAndroid.KEYCODE_HOME)
-            }
-            return
-        }
-
-        // Scroll actions
-        if (mask == WHEEL_DOWN) {
-            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, -WHEEL_STEP.toFloat())
-        }
-
-        if (mask == WHEEL_UP) {
-            injectScroll(mouseX.toFloat(), mouseY.toFloat(), 0f, WHEEL_STEP.toFloat())
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.N)
-    fun onTouchInput(mask: Int, x: Int, y: Int) {
-        // 添加日志便于调试
-        Log.d(logTag, "接收到触摸输入事件: mask=$mask, x=$x, y=$y")
-        
-        // 记录当前系统时间，用于时间间隔计算
-        val currentTime = SystemClock.uptimeMillis()
-        
-        when (mask) {
-            TOUCH_SCALE_START -> {
-                // Handle pinch to zoom start
-                lastX = x
-                lastY = y
-                Log.d(logTag, "TOUCH_SCALE_START: 初始化缩放开始点")
-            }
-            TOUCH_SCALE -> {
-                // Handle pinch to zoom
-                val deltaX = x - lastX
-                val deltaY = y - lastY
-                lastX = x
-                lastY = y
-                
-                try {
-                    // Simulate pinch gesture
-                    val downTime = SystemClock.uptimeMillis()
-                    val eventTime = SystemClock.uptimeMillis()
                     
-                    // 添加调试日志
-                    Log.d(logTag, "TOUCH_SCALE: 执行缩放, deltaX=$deltaX, deltaY=$deltaY")
-                    
-                    // This is a simplified implementation - in a real app you'd need to track multiple pointers
-                    val properties = arrayOf(MotionEvent.PointerProperties(), MotionEvent.PointerProperties())
-                    properties[0].id = 0
-                    properties[0].toolType = MotionEvent.TOOL_TYPE_FINGER
-                    properties[1].id = 1
-                    properties[1].toolType = MotionEvent.TOOL_TYPE_FINGER
-                    
-                    val pointerCoords = arrayOf(MotionEvent.PointerCoords(), MotionEvent.PointerCoords())
-                    pointerCoords[0].x = x.toFloat() - deltaX
-                    pointerCoords[0].y = y.toFloat() - deltaY
-                    pointerCoords[0].pressure = 1f
-                    pointerCoords[0].size = 1f
-                    
-                    pointerCoords[1].x = x.toFloat() + deltaX
-                    pointerCoords[1].y = y.toFloat() + deltaY
-                    pointerCoords[1].pressure = 1f
-                    pointerCoords[1].size = 1f
-                    
-                    val event = MotionEvent.obtain(
-                        downTime, eventTime,
-                        MotionEvent.ACTION_MOVE, 2, properties,
-                        pointerCoords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
-                    )
-                    
-                    injectEvent(event)
-                    event.recycle()
-                } catch (e: Exception) {
-                    Log.e(logTag, "Error during touch scale: ${e.message}")
-                }
-            }
-            TOUCH_SCALE_END -> {
-                // Handle pinch to zoom end
-                Log.d(logTag, "TOUCH_SCALE_END: 缩放手势结束")
-            }
-            TOUCH_PAN_START -> {
-                // 增强防重复触发逻辑
-                if (lastActionType == MotionEvent.ACTION_DOWN && 
-                    (currentTime - lastEventTime) < 200) {
-                    Log.d(logTag, "跳过重复的TOUCH_PAN_START事件，距上次: ${currentTime - lastEventTime}ms")
-                    return
-                }
-                
-                // 添加调试日志
-                Log.d(logTag, "TOUCH_PAN_START: 开始平移手势 at ($x, $y)")
-                
-                // Handle pan start
-                lastX = x
-                lastY = y
-                injectMotionEvent(MotionEvent.ACTION_DOWN, x.toFloat(), y.toFloat())
-            }
-            TOUCH_PAN_UPDATE -> {
-                // Handle pan update
-                // 添加调试日志
-                if (lastX != 0 && lastY != 0) {
-                    val deltaX = x - lastX
-                    val deltaY = y - lastY
-                    Log.d(logTag, "TOUCH_PAN_UPDATE: 平移更新, 移动: ($deltaX, $deltaY)")
-                }
-                
-                injectMotionEvent(MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat())
-                lastX = x
-                lastY = y
-            }
-            TOUCH_PAN_END -> {
-                // 增强防重复触发逻辑
-                if (lastActionType == MotionEvent.ACTION_UP && 
-                    (currentTime - lastEventTime) < 200) {
-                    Log.d(logTag, "跳过重复的TOUCH_PAN_END事件，距上次: ${currentTime - lastEventTime}ms")
-                    return
-                }
-                
-                // 添加调试日志
-                Log.d(logTag, "TOUCH_PAN_END: 平移手势结束 at ($x, $y)")
-                
-                // Handle pan end
-                injectMotionEvent(MotionEvent.ACTION_UP, x.toFloat(), y.toFloat())
-            }
-        }
-    }
-
-    fun onKeyEvent(input: ByteArray) {
-        try {
-            val keyEvent = KeyEvent.parseFrom(input)
-            
-            when (keyEvent.getMode().number) {
-                LEGACY_MODE -> {
-                    // 使用getChr()方法获取键码
-                    val keyCode = keyEvent.getChr()
-                    val down = keyEvent.getDown()
-                    
-                    // 处理文本输入
-                    if (keyEvent.hasChr() && (down || keyEvent.getPress())) {
-                        val chr = keyEvent.getChr()
-                        if (chr != 0) {
-                            injectText(String(Character.toChars(chr)))
-                            return
+                    // 使用系统级权限直接启动服务，不再使用MediaProjection
+                    if (checkSystemPermissions()) {
+                        val intent = Intent(this, MainService::class.java).apply {
+                            action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
                         }
-                    }
-                    
-                    // 处理普通按键
-                    if (down) {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
-                    } else {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
-                    }
-                }
-                TRANSLATE_MODE -> {
-                    // 处理文本输入
-                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
-                        injectText(keyEvent.getSeq())
-                        return
-                    }
-                    
-                    // 处理普通按键
-                    // 使用getChr()方法获取键码
-                    val keyCode = keyEvent.getChr()
-                    if (keyEvent.getDown()) {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
-                    } else {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
-                    }
-                }
-                MAP_MODE -> {
-                    // 处理文本输入
-                    if (keyEvent.hasSeq() && keyEvent.getSeq().isNotEmpty()) {
-                        injectText(keyEvent.getSeq())
-                        return
-                    }
-                    
-                    // 处理普通按键
-                    // 使用getChr()方法获取键码
-                    val keyCode = keyEvent.getChr()
-                    if (keyEvent.getDown()) {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_DOWN)
-                    } else {
-                        injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
-                    }
-                }
-                else -> {
-                    // Unsupported mode
-                    Log.e(logTag, "Unsupported keyboard mode: ${keyEvent.getMode()}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(logTag, "Failed to parse key event: ${e.message}")
-        }
-    }
-
-    // Helper methods for event injection
-    
-    private fun injectEvent(event: InputEvent): Boolean {
-        try {
-            // 由于无法使用 InputManager.injectInputEvent 方法，我们使用反射来调用它
-            inputManager?.let { manager ->
-                val method = InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.java)
-                return (method.invoke(manager, event, INJECT_INPUT_EVENT_MODE_ASYNC) as Boolean)
-            }
-        } catch (e: Exception) {
-            Log.e(logTag, "Error injecting event via reflection: ${e.message}")
-        }
-        return false
-    }
-    
-    private fun injectMotionEvent(action: Int, x: Float, y: Float, isLongPress: Boolean = false): Boolean {
-        try {
-            // 添加更多详细的日志信息
-            val actionName = when (action) {
-                MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
-                MotionEvent.ACTION_UP -> "ACTION_UP"
-                MotionEvent.ACTION_MOVE -> "ACTION_MOVE"
-                else -> "未知动作($action)"
-            }
-            
-            Log.d(logTag, "注入动作事件: $actionName at ($x, $y), isLongPress=$isLongPress")
-            
-            // 检查事件防重复（相同类型的事件在短时间内只处理一次）
-            val now = SystemClock.uptimeMillis()
-            
-            // 对于ACTION_DOWN和ACTION_UP做更严格的检查，因为这些可能导致重复点击问题
-            if (!isLongPress && 
-                (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) && 
-                action == lastActionType && 
-                (now - lastEventTime) < 250) {
-                Log.d(logTag, "跳过重复的动作事件: $actionName, 距上次: ${now - lastEventTime}ms")
-                return true
-            }
-            
-            // 对于MOVE事件，我们允许更频繁的注入，但仍然防止过于频繁
-            if (action == MotionEvent.ACTION_MOVE && 
-                action == lastActionType && 
-                (now - lastEventTime) < 16) { // 约60fps
-                // 不记录日志，避免日志过多
-                return true
-            }
-            
-            lastActionType = action
-            lastEventTime = now
-            
-            val downTime = if (action == MotionEvent.ACTION_DOWN) now else lastDownTime
-            if (action == MotionEvent.ACTION_DOWN) {
-                lastDownTime = downTime
-            }
-            
-            val eventTime = now
-            
-            // 创建MotionEvent
-            val event = MotionEvent.obtain(
-                downTime, eventTime, action, x, y, 0
-            )
-            
-            event.source = InputDevice.SOURCE_TOUCHSCREEN
-            
-            // 注入事件
-            val result = injectEvent(event)
-            event.recycle()
-            
-            if (!result) {
-                Log.e(logTag, "注入动作事件失败: $actionName")
-                
-                // 如果是UP事件，我们需要确保它被发送，尝试再次发送
-                if (action == MotionEvent.ACTION_UP) {
-                    Log.d(logTag, "尝试再次发送UP事件")
-                    
-                    // 短暂延迟后再次尝试
-                    Thread.sleep(10)
-                    
-                    val retryEvent = MotionEvent.obtain(
-                        downTime, SystemClock.uptimeMillis(), action, x, y, 0
-                    )
-                    retryEvent.source = InputDevice.SOURCE_TOUCHSCREEN
-                    val retryResult = injectEvent(retryEvent)
-                    retryEvent.recycle()
-                    
-                    return retryResult
-                }
-            }
-            
-            return result
-            
-        } catch (e: Exception) {
-            Log.e(logTag, "Error injecting motion event: ${e.message}")
-            return false
-        }
-    }
-    
-    private fun injectLongPress(x: Float, y: Float): Boolean {
-        // Simulate a long press by sending down, waiting, then up
-        val downResult = injectMotionEvent(MotionEvent.ACTION_DOWN, x, y)
-        
-        handler.postDelayed({
-            injectMotionEvent(MotionEvent.ACTION_UP, x, y)
-        }, longPressDuration)
-        
-        return downResult
-    }
-    
-    private fun injectScroll(x: Float, y: Float, hScroll: Float, vScroll: Float): Boolean {
-        try {
-            val downTime = SystemClock.uptimeMillis()
-            val eventTime = SystemClock.uptimeMillis()
-            
-            val properties = arrayOf(MotionEvent.PointerProperties().apply { 
-                id = 0
-                toolType = MotionEvent.TOOL_TYPE_MOUSE 
-            })
-            
-            val coords = arrayOf(MotionEvent.PointerCoords().apply { 
-                this.x = x
-                this.y = y
-                setAxisValue(MotionEvent.AXIS_HSCROLL, hScroll)
-                setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll)
-            })
-            
-            val event = MotionEvent.obtain(
-                downTime, eventTime, MotionEvent.ACTION_SCROLL, 1, 
-                properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0
-            )
-            
-            val result = injectEvent(event)
-            event.recycle()
-            return result
-        } catch (e: Exception) {
-            Log.e(logTag, "Error injecting scroll event: ${e.message}")
-            return false
-        }
-    }
-    
-    private fun injectKeyEvent(keyCode: Int, action: Int = KeyEventAndroid.ACTION_DOWN): Boolean {
-        try {
-            val downTime = SystemClock.uptimeMillis()
-            val eventTime = SystemClock.uptimeMillis()
-            
-            val event = KeyEventAndroid(
-                downTime, eventTime, action, keyCode, 0, 0,
-                KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0, InputDevice.SOURCE_KEYBOARD
-            )
-            
-            val result = injectEvent(event)
-            
-            // If this is a key down, automatically send a key up after a short delay
-            if (action == KeyEventAndroid.ACTION_DOWN) {
-                handler.postDelayed({
-                    injectKeyEvent(keyCode, KeyEventAndroid.ACTION_UP)
-                }, 10)
-            }
-            
-            return result
-        } catch (e: Exception) {
-            Log.e(logTag, "Error injecting key event: ${e.message}")
-            return false
-        }
-    }
-    
-    private fun injectText(text: String): Boolean {
-        if (text.isEmpty()) return false
-        
-        Log.d(logTag, "Injecting text: $text")
-        
-        // 在后台线程中处理文本注入，避免阻塞主线程
-        thread(start = true) {
-            try {
-                // 使用KeyCharacterMap将文本转换为一系列KeyEvent
-                val charMap = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
-                
-                for (char in text) {
-                    try {
-                        val events = charMap.getEvents(charArrayOf(char))
-                        if (events != null) {
-                            for (event in events) {
-                                injectEvent(event)
-                                // 添加短暂延迟以确保事件按顺序处理
-                                Thread.sleep(5)
-                            }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
                         } else {
-                            // 如果无法获取事件，尝试使用Unicode输入
-                            val unicodeEvents = getEventsForChar(char)
-                            for (event in unicodeEvents) {
-                                injectEvent(event)
-                                Thread.sleep(5)
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } else {
+                        Log.e(logTag, "缺少必要的系统级权限，无法启动服务")
+                        result.success(false)
+                    }
+                }
+                "init_service_without_permission" -> {
+                    Log.d(logTag, "尝试在定制系统环境下启动服务")
+                    try {
+                        // 绑定服务
+                        Intent(activity, MainService::class.java).also {
+                            bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
+                        }
+                        
+                        if (MainService.isReady) {
+                            result.success(true)
+                            return@setMethodCallHandler
+                        }
+                        
+                        // 在定制系统中，检查系统级权限替代MediaProjection请求
+                        if (checkSystemPermissions()) {
+                            val intent = Intent(this, MainService::class.java).apply {
+                                action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
                             }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(intent)
+                            } else {
+                                startService(intent)
+                            }
+                            result.success(true)
+                        } else {
+                            Log.e(logTag, "缺少系统级权限，无法启动服务")
+                            result.success(false)
                         }
                     } catch (e: Exception) {
-                        Log.e(logTag, "Error processing character '$char': ${e.message}")
+                        Log.e(logTag, "启动服务失败: ${e.message}")
+                        result.success(false)
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(logTag, "Error in text injection: ${e.message}")
+                "start_capture" -> {
+                    mainService?.let {
+                        result.success(it.startCapture())
+                    } ?: let {
+                        result.success(false)
+                    }
+                }
+                "stop_service" -> {
+                    Log.d(logTag, "Stop service")
+                    mainService?.let {
+                        it.destroy()
+                        result.success(true)
+                    } ?: let {
+                        result.success(false)
+                    }
+                }
+                "check_permission" -> {
+                    if (method.arguments is String) {
+                        result.success(XXPermissions.isGranted(context, method.arguments as String))
+                    } else {
+                        result.success(false)
+                    }
+                }
+                "request_permission" -> {
+                    if (method.arguments is String) {
+                        requestPermission(context, method.arguments as String)
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                START_ACTION -> {
+                    if (method.arguments is String) {
+                        startAction(context, method.arguments as String)
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                "check_video_permission" -> {
+                    mainService?.let {
+                        result.success(it.checkMediaPermission())
+                    } ?: let {
+                        result.success(false)
+                    }
+                }
+                "check_service" -> {
+                    Companion.flutterMethodChannel?.invokeMethod(
+                        "on_state_changed",
+                        mapOf("name" to "input", "value" to InputService.isOpen.toString())
+                    )
+                    Companion.flutterMethodChannel?.invokeMethod(
+                        "on_state_changed",
+                        mapOf("name" to "media", "value" to MainService.isReady.toString())
+                    )
+                    result.success(true)
+                }
+                "start_input" -> {
+                    if (InputService.ctx == null) {
+                        if (checkInjectEventsPermission(this)) {
+                            try {
+                                InputService(this)
+                                Companion.flutterMethodChannel?.invokeMethod(
+                                    "on_state_changed",
+                                    mapOf("name" to "input", "value" to InputService.isOpen.toString())
+                                )
+                                result.success(true)
+                            } catch (e: Exception) {
+                                Log.e(logTag, "Error initializing InputService: ${e.message}")
+                                result.success(false)
+                            }
+                        } else {
+                            Log.d(logTag, "Requesting INJECT_EVENTS permission")
+                            Log.e(logTag, "尝试申请INJECT_EVENTS权限")
+                            requestInjectEventsPermission(this) { granted ->
+                                if (granted) {
+                                    try {
+                                        InputService(this)
+                                        Log.d(logTag, "INJECT_EVENTS权限获取成功，已初始化InputService")
+                                    } catch (e: Exception) {
+                                        Log.e(logTag, "Error initializing InputService after permission: ${e.message}")
+                                    }
+                                } else {
+                                    Log.d(logTag, "INJECT_EVENTS permission denied")
+                                    Log.e(logTag, "INJECT_EVENTS权限被拒绝")
+                                }
+                                activity.runOnUiThread {
+                                    Companion.flutterMethodChannel?.invokeMethod(
+                                        "on_state_changed",
+                                        mapOf("name" to "input", "value" to InputService.isOpen.toString())
+                                    )
+                                }
+                            }
+                            result.success(false)
+                        }
+                    } else {
+                        Companion.flutterMethodChannel?.invokeMethod(
+                            "on_state_changed",
+                            mapOf("name" to "input", "value" to InputService.isOpen.toString())
+                        )
+                        result.success(true)
+                    }
+                }
+                "start_input_without_dialog" -> {
+                    Log.d(logTag, "尝试在定制系统环境下无需弹窗获取INJECT_EVENTS权限")
+                    if (InputService.ctx == null) {
+                        try {
+                            // 定制系统中，直接初始化InputService，应该无需显示权限请求
+                            // 在定制系统中，INJECT_EVENTS权限应该已经预授权
+                            InputService(this)
+                            Log.d(logTag, "定制系统中成功初始化InputService，无需显示权限弹窗")
+                            
+                            Companion.flutterMethodChannel?.invokeMethod(
+                                "on_state_changed",
+                                mapOf("name" to "input", "value" to "true")
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "定制系统中初始化InputService失败: ${e.message}")
+                            // 如果失败，回退到普通方式
+                            if (!checkInjectEventsPermission(this)) {
+                                requestInjectEventsPermission(this) { granted ->
+                                    if (granted) {
+                                        try {
+                                            InputService(this)
+                                            // 成功初始化后更新状态
+                                            activity.runOnUiThread {
+                                                Companion.flutterMethodChannel?.invokeMethod(
+                                                    "on_state_changed",
+                                                    mapOf("name" to "input", "value" to "true")
+                                                )
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e(logTag, "Error initializing InputService after permission: ${e.message}")
+                                        }
+                                    }
+                                    activity.runOnUiThread {
+                                        Companion.flutterMethodChannel?.invokeMethod(
+                                            "on_state_changed",
+                                            mapOf(
+                                                "name" to "input",
+                                                "value" to InputService.isOpen.toString()
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            result.success(false)
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "stop_input" -> {
+                    InputService.ctx?.disableSelf()
+                    InputService.ctx = null
+                    Companion.flutterMethodChannel?.invokeMethod(
+                        "on_state_changed",
+                        mapOf("name" to "input", "value" to InputService.isOpen.toString())
+                    )
+                    result.success(true)
+                }
+                "cancel_notification" -> {
+                    if (method.arguments is Int) {
+                        val id = method.arguments as Int
+                        mainService?.cancelNotification(id)
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "enable_soft_keyboard" -> {
+                    // https://blog.csdn.net/hanye2020/article/details/105553780
+                    if (method.arguments as Boolean) {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                    } else {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                    }
+                    result.success(true)
+
+                }
+                "try_sync_clipboard" -> {
+                    rdClipboardManager?.syncClipboard(true)
+                    result.success(true)
+                }
+                GET_START_ON_BOOT_OPT -> {
+                    val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
+                    result.success(prefs.getBoolean(KEY_START_ON_BOOT_OPT, true))
+                }
+                SET_START_ON_BOOT_OPT -> {
+                    if (method.arguments is Boolean) {
+                        val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
+                        val edit = prefs.edit()
+                        edit.putBoolean(KEY_START_ON_BOOT_OPT, method.arguments as Boolean)
+                        edit.apply()
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                SYNC_APP_DIR_CONFIG_PATH -> {
+                    if (method.arguments is String) {
+                        val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
+                        val edit = prefs.edit()
+                        edit.putString(KEY_APP_DIR_CONFIG_PATH, method.arguments as String)
+                        edit.apply()
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                GET_VALUE -> {
+                    if (method.arguments is String) {
+                        if (method.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
+                            result.success(isSupportVoiceCall())
+                        } else {
+                            result.error("-1", "No such key", null)
+                        }
+                    } else {
+                        result.success(null)
+                    }
+                }
+                "on_voice_call_started" -> {
+                    onVoiceCallStarted()
+                }
+                "on_voice_call_closed" -> {
+                    onVoiceCallClosed()
+                }
+                "ensure_ui_interactive" -> {
+                    // 确保本地UI交互能力，即使在被远程控制期间
+                    ensureUiInteractive()
+                    result.success(true)
+                }
+                else -> {
+                    result.error("-1", "No such method", null)
+                }
             }
-        }
-        
-        return true
-    }
-    
-    private fun getEventsForChar(char: Char): Array<KeyEventAndroid> {
-        val code = char.code
-        
-        // 对于基本ASCII字符，我们可以直接映射
-        if (code < 128) {
-            val keyCode = when (char) {
-                in 'a'..'z' -> KeyEventAndroid.KEYCODE_A + (char - 'a')
-                in 'A'..'Z' -> KeyEventAndroid.KEYCODE_A + (char - 'A')
-                in '0'..'9' -> KeyEventAndroid.KEYCODE_0 + (char - '0')
-                ' ' -> KeyEventAndroid.KEYCODE_SPACE
-                '.' -> KeyEventAndroid.KEYCODE_PERIOD
-                ',' -> KeyEventAndroid.KEYCODE_COMMA
-                '\n' -> KeyEventAndroid.KEYCODE_ENTER
-                else -> KeyEventAndroid.KEYCODE_UNKNOWN
-            }
-            
-            if (keyCode != KeyEventAndroid.KEYCODE_UNKNOWN) {
-                val time = SystemClock.uptimeMillis()
-                return arrayOf(
-                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, keyCode, 0, 0),
-                    KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, keyCode, 0, 0)
-                )
-            }
-        }
-        
-        // 只使用简单的方式，避免使用Builder
-        val time = SystemClock.uptimeMillis()
-        return createFallbackKeyEvents(code)
-    }
-    
-    private fun createFallbackKeyEvents(code: Int): Array<KeyEventAndroid> {
-        val time = SystemClock.uptimeMillis()
-        return try {
-            arrayOf(
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 1, 0, 0, code, 0),
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0, 0, 0, 0)
-            )
-        } catch (e: Exception) {
-            Log.e(logTag, "Error creating fallback key events: ${e.message}")
-            // 最后的备选方案 - 只发送基本按键
-            arrayOf(
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_DOWN, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0),
-                KeyEventAndroid(time, time, KeyEventAndroid.ACTION_UP, 
-                              KeyEventAndroid.KEYCODE_UNKNOWN, 0, 0)
-            )
         }
     }
 
-    fun disableSelf() {
-        try {
-            handler.removeCallbacksAndMessages(null)
-            timer.cancel()
-            ctx = null
-        } catch (e: Exception) {
-            Log.e(logTag, "Error in disableSelf: ${e.message}")
+    private fun setCodecInfo() {
+        val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+        val codecs = codecList.codecInfos
+        val codecArray = JSONArray()
+
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val wh = getScreenSize(windowManager)
+        var w = wh.first
+        var h = wh.second
+        val align = 64
+        w = (w + align - 1) / align * align
+        h = (h + align - 1) / align * align
+        codecs.forEach { codec ->
+            val codecObject = JSONObject()
+            codecObject.put("name", codec.name)
+            codecObject.put("is_encoder", codec.isEncoder)
+            var hw: Boolean? = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                hw = codec.isHardwareAccelerated
+            } else {
+                // https://chromium.googlesource.com/external/webrtc/+/HEAD/sdk/android/src/java/org/webrtc/MediaCodecUtils.java#29
+                // https://chromium.googlesource.com/external/webrtc/+/master/sdk/android/api/org/webrtc/HardwareVideoEncoderFactory.java#229
+                if (listOf("OMX.google.", "OMX.SEC.", "c2.android").any { codec.name.startsWith(it, true) }) {
+                    hw = false
+                } else if (listOf("c2.qti", "OMX.qcom.video", "OMX.Exynos", "OMX.hisi", "OMX.MTK", "OMX.Intel", "OMX.Nvidia").any { codec.name.startsWith(it, true) }) {
+                    hw = true
+                }
+            }
+            if (hw != true) {
+                return@forEach
+            }
+            codecObject.put("hw", hw)
+            var mime_type = ""
+            codec.supportedTypes.forEach { type ->
+                if (listOf("video/avc", "video/hevc").contains(type)) { // "video/x-vnd.on2.vp8", "video/x-vnd.on2.vp9", "video/av01"
+                    mime_type = type;
+                }
+            }
+            if (mime_type.isNotEmpty()) {
+                codecObject.put("mime_type", mime_type)
+                val caps = codec.getCapabilitiesForType(mime_type)
+                if (codec.isEncoder) {
+                    // Encoder's max_height and max_width are interchangeable
+                    if (!caps.videoCapabilities.isSizeSupported(w,h) && !caps.videoCapabilities.isSizeSupported(h,w)) {
+                        return@forEach
+                    }
+                }
+                codecObject.put("min_width", caps.videoCapabilities.supportedWidths.lower)
+                codecObject.put("max_width", caps.videoCapabilities.supportedWidths.upper)
+                codecObject.put("min_height", caps.videoCapabilities.supportedHeights.lower)
+                codecObject.put("max_height", caps.videoCapabilities.supportedHeights.upper)
+                val surface = caps.colorFormats.contains(COLOR_FormatSurface);
+                codecObject.put("surface", surface)
+                val nv12 = caps.colorFormats.contains(COLOR_FormatYUV420SemiPlanar)
+                codecObject.put("nv12", nv12)
+                if (!(nv12 || surface)) {
+                    return@forEach
+                }
+                codecObject.put("min_bitrate", caps.videoCapabilities.bitrateRange.lower / 1000)
+                codecObject.put("max_bitrate", caps.videoCapabilities.bitrateRange.upper / 1000)
+                if (!codec.isEncoder) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        codecObject.put("low_latency", caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency))
+                    }
+                }
+                if (!codec.isEncoder) {
+                    return@forEach
+                }
+                codecArray.put(codecObject)
+            }
         }
+        val result = JSONObject()
+        result.put("version", Build.VERSION.SDK_INT)
+        result.put("w", w)
+        result.put("h", h)
+        result.put("codecs", codecArray)
+        FFI.setCodecInfo(result.toString())
+    }
+
+    private fun onVoiceCallStarted() {
+        var ok = false
+        mainService?.let {
+            ok = it.onVoiceCallStarted()
+        } ?: let {
+            isAudioStart = true
+            ok = audioRecordHandle.onVoiceCallStarted(null)
+        }
+        if (!ok) {
+            // Rarely happens, So we just add log and msgbox here.
+            Log.e(logTag, "onVoiceCallStarted fail")
+            flutterMethodChannel?.invokeMethod("msgbox", mapOf(
+                "type" to "custom-nook-nocancel-hasclose-error",
+                "title" to "Voice call",
+                "text" to "Failed to start voice call."))
+        } else {
+            Log.d(logTag, "onVoiceCallStarted success")
+        }
+    }
+
+    private fun onVoiceCallClosed() {
+        var ok = false
+        mainService?.let {
+            ok = it.onVoiceCallClosed()
+        } ?: let {
+            isAudioStart = false
+            ok = audioRecordHandle.onVoiceCallClosed(null)
+        }
+        if (!ok) {
+            // Rarely happens, So we just add log and msgbox here.
+            Log.e(logTag, "onVoiceCallClosed fail")
+            flutterMethodChannel?.invokeMethod("msgbox", mapOf(
+                "type" to "custom-nook-nocancel-hasclose-error",
+                "title" to "Voice call",
+                "text" to "Failed to stop voice call."))
+        } else {
+            Log.d(logTag, "onVoiceCallClosed success")
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        val disableFloatingWindow = FFI.getLocalOption("disable-floating-window") == "Y"
+        if (!disableFloatingWindow && MainService.isReady) {
+            startService(Intent(this, FloatingWindowService::class.java))
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        stopService(Intent(this, FloatingWindowService::class.java))
+    }
+
+    // 确保应用自身UI在被远程控制期间仍然可交互
+    private fun ensureUiInteractive() {
+        Log.d(logTag, "确保本地UI交互能力")
+        try {
+            // 1. 暂时暂停输入服务的事件处理
+            InputService.ctx?.let { service ->
+                // 记录当前应用窗口位置和前台状态
+                window.decorView.post {
+                    val appPackageName = packageName
+                    val isAppForeground = isAppInForeground(appPackageName)
+                    
+                    if (isAppForeground) {
+                        Log.d(logTag, "应用在前台，临时调整输入事件处理模式")
+                        
+                        // 允许RustDesk应用自身接收本地UI事件
+                        window.decorView.setOnTouchListener { _, event ->
+                            // 仅处理我们应用自身的UI事件，不干扰远程控制事件
+                            false // 返回false表示不消费事件，允许事件继续传递
+                        }
+                        
+                        // 确保窗口具有焦点和交互能力
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                    } else {
+                        Log.d(logTag, "应用不在前台，无需调整UI交互")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "确保UI交互时出错: ${e.message}")
+        }
+    }
+    
+    // 检查应用是否在前台
+    private fun isAppInForeground(packageName: String): Boolean {
+        try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val appProcesses = activityManager.runningAppProcesses ?: return false
+            
+            for (appProcess in appProcesses) {
+                if (appProcess.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND && 
+                    appProcess.processName == packageName) {
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "检查应用前台状态时出错: ${e.message}")
+        }
+        return false
     }
 }
