@@ -470,11 +470,19 @@ class MainActivity : FlutterActivity() {
                     try {
                         Log.d("SunmiSN", "Flutter请求获取SN号")
                         val sn = getDeviceSN(this)
-                        Log.d("SunmiSN", "向Flutter返回SN: '$sn'")
-                        // 返回一个Map而不是直接返回字符串
-                        val resultMap = HashMap<String, String>()
-                        resultMap["sn"] = sn
-                        result.success(resultMap)
+                        Log.d("SunmiSN", "获取到SN: '$sn'")
+                        
+                        // 通过方法通道异步传递SN号到Flutter
+                        Handler(Looper.getMainLooper()).post {
+                            Companion.flutterMethodChannel?.invokeMethod(
+                                "on_sn_received", 
+                                mapOf("sn" to sn)
+                            )
+                            Log.d("SunmiSN", "已发送SN给Flutter: '$sn'")
+                        }
+                        
+                        // 直接返回true
+                        result.success(true)
                     } catch (e: Exception) {
                         Log.e("SunmiSN", "获取SN号失败: ${e.message}")
                         result.error("SN_ERROR", "获取SN号失败", e.toString())
