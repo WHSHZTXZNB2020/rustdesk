@@ -140,7 +140,7 @@ class ServiceNotRunningNotification extends StatelessWidget {
                   // 直接启动服务，不显示警告弹窗
                   serverModel.toggleService();
                 },
-                label: Text(translate("开始屏幕共享")))
+                label: Text(translate("开始协助")))
           ],
         ));
   }
