@@ -224,16 +224,6 @@ class _ServerPageState extends State<ServerPage> {
                   ),
                 )));
   }
-
-  /// 设置SN号接收监听
-  void _setupSNReceiver() {
-    // 使用全局方法通道处理器
-    // 确保只设置一次
-    if (!_methodHandlerInitialized) {
-      androidChannelInit();
-      _methodHandlerInitialized = true;
-    }
-  }
 }
 
 void checkService() async {
@@ -483,8 +473,7 @@ class _ServerInfoState extends State<ServerInfo> {
   @override
   void initState() {
     super.initState();
-    // 设置监听器，然后主动请求SN
-    _setupSNReceiver();
+    // 直接请求SN，不需要另外设置监听器
     _requestDeviceSN();
   }
   
@@ -494,6 +483,13 @@ class _ServerInfoState extends State<ServerInfo> {
     
     debugPrint("==== SunmiSN调试 ==== 主动请求SN号...");
     try {
+      // 确保全局监听器已初始化
+      if (!_methodHandlerInitialized) {
+        androidChannelInit();
+        _methodHandlerInitialized = true;
+      }
+      
+      // 请求获取SN
       await gFFI.invokeMethod("get_device_sn");
       // 请求已发送，等待回调更新UI
     } catch (e) {
