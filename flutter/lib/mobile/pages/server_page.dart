@@ -695,44 +695,53 @@ class ConnectionManager extends StatelessWidget {
       final clients = serverModel.clients;
       if (clients.isEmpty) return const SizedBox.shrink();
 
-      return PaddingCard(
-        title: translate("Connections"),
-        child: Column(
-          children: clients.map((client) {
-            return Column(
+      return Column(
+        children: clients.map((client) {
+          return PaddingCard(
+            title: translate(client.isFileTransfer ? "文件连接" : "屏幕连接"),
+            titleIcon: client.isFileTransfer
+                ? Icon(Icons.folder_outlined, color: Colors.blue)
+                : Icon(Icons.mobile_screen_share, color: Colors.blue),
+            child: Column(
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    CircleAvatar(
-                      backgroundColor: Colors.blue,
-                      child: Icon(Icons.computer, color: Colors.white),
-                    ),
-                    SizedBox(width: 10),
+                    Expanded(child: ClientInfo(client)),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(client.name, 
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          Text(client.peerId,
-                            style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        ],
-                      ),
+                      flex: -1,
+                      child: client.isFileTransfer || !client.authorized
+                          ? const SizedBox.shrink()
+                          : IconButton(
+                              onPressed: () {
+                                gFFI.chatModel.changeCurrentKey(
+                                    MessageKey(client.peerId, client.id));
+                                final bar = navigationBarKey.currentWidget;
+                                if (bar != null) {
+                                  bar as BottomNavigationBar;
+                                  bar.onTap!(1);
+                                }
+                              },
+                              icon: unreadTopRightBuilder(
+                                  client.unreadChatMessageCount)),
                     ),
-                    TextButton(
-                      child: Text(translate("Disconnect"), 
-                        style: TextStyle(color: Colors.red)),
-                      onPressed: () {
-                        bind.cmCloseConnection(connId: client.id);
-                      },
-                    )
                   ],
                 ),
-                Divider(),
+                client.authorized
+                    ? const SizedBox.shrink()
+                    : Text(
+                        translate("android_new_connection_tip"),
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ).marginOnly(bottom: 5),
+                client.authorized
+                    ? _buildDisconnectButton(client)
+                    : _buildNewConnectionHint(serverModel, client),
+                if (client.incomingVoiceCall && !client.inVoiceCall)
+                  ..._buildNewVoiceCallHint(context, serverModel, client),
               ],
-            );
-          }).toList(),
-        ),
+            ),
+          );
+        }).toList(),
       );
     });
   }
@@ -793,8 +802,11 @@ class PaddingCard extends StatelessWidget {
                   ],
                 ),
               ),
-            // 内容
-            child,
+            // 内容，增加左侧内边距使整体向右移动
+            Padding(
+              padding: const EdgeInsets.only(left: 15.0),
+              child: child,
+            ),
           ],
         ),
       ),
@@ -845,4 +857,58 @@ void showScamWarning(BuildContext context, ServerModel serverModel) {
       return ScamWarningDialog(serverModel: serverModel);
     },
   );
+}
+
+Widget _buildDisconnectButton(Client client) {
+  final disconnectButton = ElevatedButton(
+    style: ButtonStyle(
+      backgroundColor: MaterialStateProperty.all(Colors.red),
+    ),
+    onPressed: () {
+      bind.cmCloseConnection(connId: client.id);
+      gFFI.invokeMethod("cancel_notification", client.id);
+    },
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Text(
+        translate("断开连接"),
+        style: TextStyle(fontSize: 16.0),
+      ),
+    ),
+  );
+  
+  final buttons = [disconnectButton];
+  if (client.inVoiceCall) {
+    buttons.insert(
+      0,
+      ElevatedButton(
+        style: ButtonStyle(
+          backgroundColor: MaterialStateProperty.all(Colors.red),
+        ),
+        onPressed: () {
+          bind.cmCloseVoiceCall(id: client.id);
+          gFFI.invokeMethod("cancel_notification", client.id);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            translate("Stop"),
+            style: TextStyle(fontSize: 16.0),
+          ),
+        ),
+      ),
+    );
+  }
+
+  if (buttons.length == 1) {
+    return Container(
+      alignment: Alignment.centerRight,
+      child: disconnectButton,
+    );
+  } else {
+    return Row(
+      children: buttons,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    );
+  }
 }
