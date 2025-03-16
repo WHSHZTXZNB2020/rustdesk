@@ -43,26 +43,6 @@ class HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _selectedIndex = 0; // 确保始终从远程协助页面启动
-    
-    // disable scaling gesture
-    if (Platform.isAndroid) {
-      GestureBinding.instance.resamplingEnabled = false;
-    }
-    cm_responding_field = Get.put(CM_Responding());
-    gFFI.ffiModel.updateEventListener(gFFI.sessionId, (event) {
-      switch (event.field0) {
-        case "chat_client_close":
-          final id = int.parse(event.field1);
-          gFFI.chatModel.hideChatWindowByClientId(id);
-          break;
-        case "chat_server_close":
-          final id = int.parse(event.field1);
-          gFFI.chatModel.hideChatWindowByClientId(id);
-          break;
-        default:
-          break;
-      }
-    });
     initPages();
   }
 
