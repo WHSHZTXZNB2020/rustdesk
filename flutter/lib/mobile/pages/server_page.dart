@@ -121,6 +121,10 @@ class ServiceNotRunningNotification extends StatelessWidget {
         title: translate("远程未运行"),
         titleIcon:
             const Icon(Icons.warning_amber_sharp, color: Colors.redAccent),
+        titleTextStyle: TextStyle(
+          fontSize: 18.0, // 设置标题字体大小为18px
+          fontWeight: FontWeight.bold,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -443,10 +447,9 @@ class _ServerInfoState extends State<ServerInfo> {
     }
 
     // 根据SN获取状态决定标题内容
-    String cardTitle = translate('本机商米SN'); // 默认显示"本机商米SN"
-    if (_hasFetchedSN && (_deviceSN.isEmpty || _deviceSN == "Unknown")) {
-      cardTitle = translate('你的设备'); // 仅在获取失败时显示"你的设备"
-    }
+    String cardTitle = _deviceSN.isNotEmpty && _deviceSN != "Unknown" 
+        ? translate('本机商米SN') // 有SN时显示"本机商米SN"
+        : translate('你的设备'); // 无SN时显示"你的设备"
 
     return PaddingCard(
       title: cardTitle,
@@ -458,10 +461,10 @@ class _ServerInfoState extends State<ServerInfo> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 首先显示SN号（如果有）- 减小与标题的间隙
+          // 首先显示SN号（如果有）- 调整与标题的间隙
           if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
             Padding(
-              padding: EdgeInsets.only(top: 5.0), // 减小与标题的间隔
+              padding: EdgeInsets.only(top: 2.0), // 减小与标题的间隔为2.0
               child: Text(
                 _deviceSN,
                 style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // 设置SN字体大小为25px
@@ -622,6 +625,10 @@ class _PermissionCheckerState extends State<PermissionChecker> {
       return PaddingCard(
         title: translate("权限"),
         titleIcon: null, // 移除权限标题图标
+        titleTextStyle: TextStyle(
+          fontSize: 18.0, // 设置标题字体大小为18px
+          fontWeight: FontWeight.bold,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -702,6 +709,10 @@ class ConnectionManager extends StatelessWidget {
             titleIcon: client.isFileTransfer
                 ? Icon(Icons.folder_outlined, color: Colors.blue)
                 : Icon(Icons.mobile_screen_share, color: Colors.blue),
+            titleTextStyle: TextStyle(
+              fontSize: 18.0, // 设置标题字体大小为18px
+              fontWeight: FontWeight.bold,
+            ),
             child: Column(
               children: [
                 Row(
@@ -868,7 +879,7 @@ class PaddingCard extends StatelessWidget {
     );
 
     return Card(
-      margin: const EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 5.0),
+      margin: const EdgeInsets.fromLTRB(12.0, 8.0, 12.0, 5.0),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -877,7 +888,7 @@ class PaddingCard extends StatelessWidget {
             // 标题行，仅在有标题时显示
             if (title.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
+                padding: const EdgeInsets.only(bottom: 12.0, left: 5.0),
                 child: Row(
                   children: [
                     // 标题图标，仅在提供图标时显示
