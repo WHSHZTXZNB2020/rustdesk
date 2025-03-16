@@ -458,9 +458,6 @@ class _ServerInfoState extends State<ServerInfo> {
         ? translate('本机商米SN') // 有SN时显示"本机商米SN"
         : translate('你的设备'); // 无SN时显示"你的设备"
 
-    final showOneTime = serverModel.approveMode != 'click' &&
-        serverModel.verificationMethod != kUsePermanentPassword;
-
     return PaddingCard(
       title: cardTitle,
       titleIcon: null, // 移除标题图标
@@ -474,12 +471,26 @@ class _ServerInfoState extends State<ServerInfo> {
           // 首先显示SN号（如果有）
           if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
             Padding(
-              padding: EdgeInsets.only(bottom: 10.0), // 与下方ID部分的间隔
-              child: Text(
-                _deviceSN,
-                style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // SN字体大小为25px
+              padding: EdgeInsets.only(top: 0), // 减小与标题的间隔为0
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _deviceSN,
+                    style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // SN字体大小为25px
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.copy_outlined),
+                    onPressed: () {
+                      copyToClipboard(_deviceSN.trim());
+                    }
+                  )
+                ],
               ),
             ),
+          
+          SizedBox(height: 10), // SN和ID之间的间隔
           
           // ID
           Row(children: [
@@ -491,49 +502,17 @@ class _ServerInfoState extends State<ServerInfo> {
               style: textStyleHeading,
             )
           ]),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text(
-              model.serverId.value.text,
-              style: textStyleValue,
-            ),
-            IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.copy_outlined),
-                onPressed: () {
-                  copyToClipboard(model.serverId.value.text.trim());
-                })
-          ]).marginOnly(left: 39, bottom: 10), // 保持左侧缩进39，确保与ID对齐
+          Row(
+            children: [
+              Text(
+                model.serverId.value.text,
+                style: textStyleValue,
+              ),
+              // 删除ID右侧的复制按钮
+            ],
+          ).marginOnly(left: 39, bottom: 10), // 保持左侧缩进39，确保与ID对齐
           
-          // Password
-          Row(children: [
-            const Icon(Icons.lock_outline, color: Colors.grey, size: iconSize)
-                .marginOnly(right: iconMarginRight),
-            Text(
-              translate('One-time Password'),
-              style: textStyleHeading,
-            )
-          ]),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text(
-              !showOneTime ? '-' : model.serverPasswd.value.text,
-              style: textStyleValue,
-            ),
-            !showOneTime
-                ? SizedBox.shrink()
-                : Row(children: [
-                    IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.refresh),
-                        onPressed: () => bind.mainUpdateTemporaryPassword()),
-                    IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(Icons.copy_outlined),
-                        onPressed: () {
-                          copyToClipboard(
-                              model.serverPasswd.value.text.trim());
-                        })
-                  ])
-          ]).marginOnly(left: 40, bottom: 15), // 保持左侧缩进40
+          // 连接状态
           ConnectionStateNotification()
         ],
       ),
@@ -656,77 +635,44 @@ class PermissionChecker extends StatefulWidget {
 class _PermissionCheckerState extends State<PermissionChecker> {
   @override
   Widget build(BuildContext context) {
-    return Consumer<ServerModel>(builder: (context, model, child) {
-      final hasAudioPermission = androidVersion >= 30;
-      
-      return PaddingCard(
+    final serverModel = Provider.of<ServerModel>(context);
+    final hasAudioPermission = androidVersion >= 30;
+    return PaddingCard(
         title: translate("权限"),
         titleIcon: null, // 移除权限标题图标
         titleTextStyle: TextStyle(
           fontSize: 18.0, // 设置标题字体大小为18px
           fontWeight: FontWeight.bold,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 显示停止服务按钮
-            if (model.isStart)
-              ElevatedButton(
-                style: ButtonStyle(
-                  backgroundColor: MaterialStateProperty.all(Colors.red),
-                ),
-                onPressed: () {
-                  model.toggleService();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text(
-                    translate("停止服务"),
-                    style: TextStyle(fontSize: 16.0),
-                  ),
-                ),
-              ),
-              
-            // 文件传输开关
-            SwitchListTile(
-              visualDensity: VisualDensity.compact,
-              contentPadding: EdgeInsets.all(0),
-              title: Text(translate("Transfer file")),
-              value: model.fileOk,
-              onChanged: (_) => model.toggleFile(),
-            ),
-            
-            // 音频捕获开关（仅在Android 10及以上版本显示）
-            hasAudioPermission
-              ? SwitchListTile(
-                  visualDensity: VisualDensity.compact,
-                  contentPadding: EdgeInsets.all(0),
-                  title: Text(translate("Audio Capture")),
-                  value: model.audioOk,
-                  onChanged: (_) => model.toggleAudio(),
-                )
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          serverModel.mediaOk
+              ? ElevatedButton.icon(
+                      style: ButtonStyle(
+                          backgroundColor:
+                              MaterialStateProperty.all(Colors.red)),
+                      icon: const Icon(Icons.stop),
+                      onPressed: serverModel.toggleService,
+                      label: Text(translate("Stop service")))
+                  .marginOnly(bottom: 8)
+              : SizedBox.shrink(),
+          // 文件传输
+          PermissionRow(translate("Transfer file"), serverModel.fileOk,
+              serverModel.toggleFile),
+          // 调换位置：先显示"同步剪贴"，再显示"音频录制"
+          PermissionRow(translate("Enable clipboard"), serverModel.clipboardOk,
+              serverModel.toggleClipboard),
+          hasAudioPermission
+              ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
+                  serverModel.toggleAudio)
               : Row(children: [
                   Icon(Icons.info_outline).marginOnly(right: 15),
                   Expanded(
-                    child: Text(
-                      translate("android_version_audio_tip"),
-                      style: const TextStyle(color: MyTheme.darkGray),
-                    )
-                  )
+                      child: Text(
+                    translate("android_version_audio_tip"),
+                    style: const TextStyle(color: MyTheme.darkGray),
+                  ))
                 ]),
-                
-            // 剪贴板开关
-            SwitchListTile(
-              visualDensity: VisualDensity.compact,
-              contentPadding: EdgeInsets.all(0),
-              title: Text(translate("Enable clipboard")),
-              value: model.clipboardOk,
-              onChanged: (_) => model.toggleClipboard(),
-            ),
-          ],
-        ),
-      );
-    });
+        ]));
   }
 }
 
