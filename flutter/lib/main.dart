@@ -596,10 +596,10 @@ class MobileDirectServer extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.more_vert), // 保持三点菜单图标
             onPressed: () {
-              // 直接打开设置页面
+              // 打开设置页面（使用HomePage作为入口）
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const SettingsPage()),
+                MaterialPageRoute(builder: (context) => HomePage()),
               );
             },
           ),
@@ -607,93 +607,5 @@ class MobileDirectServer extends StatelessWidget {
       ),
       body: ServerPage(),
     );
-  }
-}
-
-// 简单的设置页面
-class SettingsPage extends StatelessWidget {
-  const SettingsPage({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(translate("Settings")),
-      ),
-      body: ListView(
-        children: [
-          ListTile(
-            leading: Icon(Icons.language),
-            title: Text(translate("Language")),
-            onTap: () => showLanguageSettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.color_lens),
-            title: Text(translate("Theme")),
-            onTap: () => showThemeSettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.wifi),
-            title: Text(translate("Network")),
-            onTap: () => showNetworkSettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.security),
-            title: Text(translate("Security")),
-            onTap: () => showSecuritySettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.perm_identity),
-            title: Text(translate("ID/Relay Server")),
-            onTap: () => showServerSettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.account_box),
-            title: Text(translate("Account")),
-            onTap: () => showAccountSettings(context),
-          ),
-          ListTile(
-            leading: Icon(Icons.info),
-            title: Text(translate("About")),
-            onTap: () => showAbout(context),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  void showLanguageSettings(BuildContext context) {
-    // 打开语言设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "language");
-  }
-  
-  void showThemeSettings(BuildContext context) {
-    // 打开主题设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "theme");
-  }
-  
-  void showNetworkSettings(BuildContext context) {
-    // 打开网络设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "network");
-  }
-  
-  void showSecuritySettings(BuildContext context) {
-    // 打开安全设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "security");
-  }
-  
-  void showServerSettings(BuildContext context) {
-    // 打开服务器设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "server");
-  }
-  
-  void showAccountSettings(BuildContext context) {
-    // 打开账户设置
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "account");
-  }
-  
-  void showAbout(BuildContext context) {
-    // 打开关于页面
-    gFFI.dialogManager.toggleMobileSettingsDialog(context, "about");
   }
 }
