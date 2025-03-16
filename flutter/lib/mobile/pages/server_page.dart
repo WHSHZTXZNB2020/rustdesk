@@ -658,9 +658,10 @@ class _PermissionCheckerState extends State<PermissionChecker> {
           // 文件传输
           PermissionRow(translate("Transfer file"), serverModel.fileOk,
               serverModel.toggleFile),
-          // 调换位置：先显示"同步剪贴"，再显示"音频录制"
+          // 同步剪贴板
           PermissionRow(translate("Enable clipboard"), serverModel.clipboardOk,
               serverModel.toggleClipboard),
+          // 音频录制（仅在Android版本>=30时显示）
           hasAudioPermission
               ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
                   serverModel.toggleAudio)
@@ -936,6 +937,34 @@ class ClientInfo extends StatelessWidget {
             ],
           ),
         ]));
+  }
+}
+
+// 添加缺失的PermissionRow类定义
+class PermissionRow extends StatelessWidget {
+  const PermissionRow(this.name, this.isOk, this.onPressed, {Key? key})
+      : super(key: key);
+
+  final String name;
+  final bool isOk;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    // 如果是"输入控制"或"屏幕录制"，不在UI中显示
+    if (name == translate("Input Control") || name == translate("Screen Capture")) {
+      return SizedBox.shrink(); // 不显示这些选项
+    }
+    
+    // 正常显示其他权限选项
+    return SwitchListTile(
+        visualDensity: VisualDensity.compact,
+        contentPadding: EdgeInsets.all(0),
+        title: Text(name),
+        value: isOk,
+        onChanged: (bool value) {
+          onPressed();
+        });
   }
 }
 
