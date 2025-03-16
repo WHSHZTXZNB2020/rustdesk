@@ -463,6 +463,10 @@ class MainActivity : FlutterActivity() {
                     ensureUiInteractive()
                     result.success(true)
                 }
+                "get_device_sn" -> {
+                    // 获取设备SN号
+                    result.success(getDeviceSN())
+                }
                 else -> {
                     result.error("-1", "No such method", null)
                 }
