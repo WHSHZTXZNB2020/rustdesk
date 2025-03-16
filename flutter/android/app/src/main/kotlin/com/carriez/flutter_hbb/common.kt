@@ -176,49 +176,38 @@ fun getScreenSize(windowManager: WindowManager) : Pair<Int, Int>{
 
 // 获取设备SN号的函数
 fun getDeviceSN(): String {
-    var serial = ""
     try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11及以上版本
+        val c = Class.forName("android.os.SystemProperties")
+        val get = c.getMethod("get", String::class.java)
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {		
             try {
-                val c = Class.forName("android.os.SystemProperties")
-                val get = c.getMethod("get", String::class.java)
-                serial = get.invoke(c, "ro.sunmi.serial") as? String ?: ""
-                if (serial.isEmpty()) {
-                    serial = get.invoke(c, "ro.serialno") as? String ?: ""
-                }
+                val serial = get.invoke(c, "ro.sunmi.serial") as String?
+                return serial ?: "Unknown"
             } catch (e: Exception) {
-                Log.e("SN", "获取SN号失败: ${e.message}")
                 e.printStackTrace()
             }
+            return "Unknown"
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Android 8.0及以上版本
             try {
-                serial = Build.getSerial()
+                val serial = Build.getSerial()
+                return serial
             } catch (e: Exception) {
-                Log.e("SN", "获取SN号失败: ${e.message}")
                 e.printStackTrace()
             }
+            return "Unknown"
         } else {
-            // Android 8.0以下版本
+            // 安卓8以下使用相同方式
             try {
-                val c = Class.forName("android.os.SystemProperties")
-                val get = c.getMethod("get", String::class.java)
-                serial = get.invoke(c, "ro.serialno") as? String ?: ""
+                val serial = get.invoke(c, "ro.serialno") as String?
+                return serial ?: "Unknown"
             } catch (e: Exception) {
-                Log.e("SN", "获取SN号失败: ${e.message}")
                 e.printStackTrace()
             }
+            return "Unknown"
         }
     } catch (e: Exception) {
-        Log.e("SN", "获取SN号发生异常: ${e.message}")
         e.printStackTrace()
+        return "Unknown"
     }
-    
-    // 如果SN为空，返回一个默认值
-    if (serial.isEmpty()) {
-        serial = "Unknown"
-    }
-    
-    return serial
 }
