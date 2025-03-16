@@ -224,6 +224,107 @@ class _ServerPageState extends State<ServerPage> {
                   ),
                 )));
   }
+
+  void _setupSNReceiver() {
+    // 直接监听Android的SN回调
+    androidChannelInit();
+  }
+  
+  // 在类外部定义，而不是重新设置方法处理器
+  void androidChannelInit() {
+    gFFI.setMethodCallHandler((method, arguments) {
+      debugPrint("flutter got android msg,$method,$arguments");
+      try {
+        switch (method) {
+          case "on_sn_received":
+            if (arguments is Map) {
+              final sn = arguments["sn"] as String?;
+              debugPrint("==== SunmiSN调试 ==== 收到Android发送的SN: '$sn'");
+              // 查找ServerInfo组件并更新SN
+              updateDeviceSN(sn);
+            }
+            break;
+          case "start_capture":
+            {
+              gFFI.dialogManager.dismissAll();
+              gFFI.serverModel.updateClientState();
+              break;
+            }
+          case "on_state_changed":
+            {
+              var name = arguments["name"] as String;
+              var value = arguments["value"] as String == "true";
+              debugPrint("from jvm:on_state_changed,$name:$value");
+              gFFI.serverModel.changeStatue(name, value);
+              break;
+            }
+          case "on_android_permission_result":
+            {
+              var type = arguments["type"] as String;
+              var result = arguments["result"] as bool;
+              AndroidPermissionManager.complete(type, result);
+              break;
+            }
+          case "on_media_projection_canceled":
+            {
+              gFFI.serverModel.stopService();
+              break;
+            }
+          case "msgbox":
+            {
+              var type = arguments["type"] as String;
+              var title = arguments["title"] as String;
+              var text = arguments["text"] as String;
+              var link = (arguments["link"] ?? '') as String;
+              msgBox(gFFI.sessionId, type, title, text, link, gFFI.dialogManager);
+              break;
+            }
+          case "stop_service":
+            {
+              print(
+                  "stop_service by kotlin, isStart:${gFFI.serverModel.isStart}");
+              if (gFFI.serverModel.isStart) {
+                gFFI.serverModel.stopService();
+              }
+              break;
+            }
+        }
+      } catch (e) {
+        debugPrintStack(label: "MethodCallHandler err:$e");
+      }
+      return "";
+    });
+  }
+
+  // 全局函数用于更新所有ServerInfo实例的SN
+  void updateDeviceSN(String? sn) {
+    if (sn == null || sn.isEmpty || sn == "Unknown") return;
+    
+    // 查找所有_ServerInfoState实例并更新
+    for (final element in findServerInfoStates()) {
+      element.setState(() {
+        element._deviceSN = sn;
+        element._hasFetchedSN = true;
+        debugPrint("==== SunmiSN调试 ==== 设置SN为: $sn");
+      });
+    }
+  }
+  
+  // 查找所有_ServerInfoState实例
+  List<_ServerInfoState> findServerInfoStates() {
+    final states = <_ServerInfoState>[];
+    void visitor(Element element) {
+      if (element.widget is ServerInfo) {
+        final state = (element as StatefulElement).state;
+        if (state is _ServerInfoState) {
+          states.add(state);
+        }
+      }
+      element.visitChildren(visitor);
+    }
+    WidgetsBinding.instance.rootElement?.visitChildren(visitor);
+    return states;
+  }
 }
 
 void checkService() async {
@@ -473,79 +574,38 @@ class _ServerInfoState extends State<ServerInfo> {
   @override
   void initState() {
     super.initState();
-    _fetchDeviceSN();
+    // 设置监听器，然后主动请求SN
+    _setupSNReceiver();
+    _requestDeviceSN();
   }
   
-  Future<void> _fetchDeviceSN() async {
+  /// 主动请求设备SN号
+  Future<void> _requestDeviceSN() async {
     if (_hasFetchedSN) return;
     
-    debugPrint("==== SunmiSN调试 ==== 开始获取SN号...");
-    
+    debugPrint("==== SunmiSN调试 ==== 主动请求SN号...");
     try {
-      // 期望收到一个Map，其中包含sn键
-      final dynamic result = await gFFI.invokeMethod("get_device_sn");
-      debugPrint("==== SunmiSN调试 ==== 收到原始返回值类型: ${result?.runtimeType}");
-      
-      // 处理Map类型返回值
-      if (result is Map) {
-        debugPrint("==== SunmiSN调试 ==== 收到Map: $result");
-        final sn = result["sn"];
-        if (sn != null && sn is String && sn.isNotEmpty && sn != "Unknown") {
-          setState(() {
-            _deviceSN = sn.trim();
-            _hasFetchedSN = true;
-            debugPrint("==== SunmiSN调试 ==== 成功设置SN: '$_deviceSN'");
-          });
-        } else {
-          debugPrint("==== SunmiSN调试 ==== Map中的SN无效: $sn");
-          setState(() {
-            _deviceSN = "Unknown";
-            _hasFetchedSN = true;
-          });
-        }
-      } 
-      // 处理旧的布尔值返回类型
-      else if (result is bool) {
-        debugPrint("==== SunmiSN调试 ==== 收到布尔值: $result");
-        setState(() {
-          _deviceSN = "Unknown"; // 由于类型不符，显示为Unknown
-          _hasFetchedSN = true;
-        });
-      }
-      // 处理直接返回字符串的情况
-      else if (result is String) {
-        debugPrint("==== SunmiSN调试 ==== 直接收到字符串SN: '$result'");
-        final sn = result.trim();
-        if (sn.isNotEmpty && sn != "Unknown") {
-          setState(() {
-            _deviceSN = sn;
-            _hasFetchedSN = true;
-            debugPrint("==== SunmiSN调试 ==== 成功设置字符串SN: '$_deviceSN'");
-          });
-        } else {
-          setState(() {
-            _deviceSN = "Unknown";
-            _hasFetchedSN = true;
-          });
-        }
-      }
-      // 其他类型
-      else {
-        debugPrint("==== SunmiSN调试 ==== 返回值类型未知: ${result?.runtimeType}");
-        setState(() {
-          _deviceSN = "Unknown";
-          _hasFetchedSN = true;
-        });
-      }
+      await gFFI.invokeMethod("get_device_sn");
+      // 请求已发送，等待回调更新UI
     } catch (e) {
-      debugPrint("==== SunmiSN调试 ==== 获取SN号异常: $e");
+      debugPrint("==== SunmiSN调试 ==== 请求SN异常: $e");
       setState(() {
         _deviceSN = "Unknown";
         _hasFetchedSN = true;
       });
     }
   }
-
+  
+  /// 设置SN号接收监听
+  void _setupSNReceiver() {
+    // 使用全局方法通道处理器
+    // 确保只设置一次
+    if (!_methodHandlerInitialized) {
+      setupSNHandler();
+      _methodHandlerInitialized = true;
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
@@ -623,6 +683,105 @@ class _ServerInfoState extends State<ServerInfo> {
           ],
         ));
   }
+}
+
+// 标记方法处理器是否已初始化
+bool _methodHandlerInitialized = false;
+
+// 设置全局SN处理器
+void setupSNHandler() {
+  // 不再使用原始处理器
+  gFFI.setMethodCallHandler((method, arguments) {
+    debugPrint("flutter got android msg: $method, $arguments");
+    try {
+      // 处理SN接收
+      if (method == "on_sn_received" && arguments is Map) {
+        final sn = arguments["sn"] as String?;
+        debugPrint("==== SunmiSN调试 ==== 收到Android发送的SN: '$sn'");
+        if (sn != null && sn.isNotEmpty && sn != "Unknown") {
+          updateServerInfoSN(sn);
+        }
+        return "";
+      }
+      
+      // 处理其他系统事件
+      switch (method) {
+        case "start_capture":
+          {
+            gFFI.dialogManager.dismissAll();
+            gFFI.serverModel.updateClientState();
+            break;
+          }
+        case "on_state_changed":
+          {
+            var name = arguments["name"] as String;
+            var value = arguments["value"] as String == "true";
+            debugPrint("from jvm:on_state_changed,$name:$value");
+            gFFI.serverModel.changeStatue(name, value);
+            break;
+          }
+        case "on_android_permission_result":
+          {
+            var type = arguments["type"] as String;
+            var result = arguments["result"] as bool;
+            AndroidPermissionManager.complete(type, result);
+            break;
+          }
+        case "on_media_projection_canceled":
+          {
+            gFFI.serverModel.stopService();
+            break;
+          }
+        case "msgbox":
+          {
+            var type = arguments["type"] as String;
+            var title = arguments["title"] as String;
+            var text = arguments["text"] as String;
+            var link = (arguments["link"] ?? '') as String;
+            msgBox(gFFI.sessionId, type, title, text, link, gFFI.dialogManager);
+            break;
+          }
+        case "stop_service":
+          {
+            print(
+                "stop_service by kotlin, isStart:${gFFI.serverModel.isStart}");
+            if (gFFI.serverModel.isStart) {
+              gFFI.serverModel.stopService();
+            }
+            break;
+          }
+      }
+    } catch (e) {
+      debugPrintStack(label: "MethodCallHandler err: $e");
+    }
+    return "";
+  });
+}
+
+// 更新所有ServerInfo实例的SN
+void updateServerInfoSN(String sn) {
+  // 遍历所有Element查找ServerInfo组件
+  void visitor(Element element) {
+    if (element is StatefulElement && element.state is _ServerInfoState) {
+      final state = element.state as _ServerInfoState;
+      if (!state._hasFetchedSN) {
+        state.setState(() {
+          state._deviceSN = sn;
+          state._hasFetchedSN = true;
+          debugPrint("==== SunmiSN调试 ==== 更新UI中的SN为: '$sn'");
+        });
+      }
+    }
+    element.visitChildren(visitor);
+  }
+  
+  // 在下一帧执行，确保组件已经构建
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final context = globalKey.currentContext;
+    if (context != null) {
+      (context as Element).visitChildren(visitor);
+    }
+  });
 }
 
 class PermissionChecker extends StatefulWidget {
@@ -938,63 +1097,6 @@ class ClientInfo extends StatelessWidget {
           ),
         ]));
   }
-}
-
-void androidChannelInit() {
-  gFFI.setMethodCallHandler((method, arguments) {
-    debugPrint("flutter got android msg,$method,$arguments");
-    try {
-      switch (method) {
-        case "start_capture":
-          {
-            gFFI.dialogManager.dismissAll();
-            gFFI.serverModel.updateClientState();
-            break;
-          }
-        case "on_state_changed":
-          {
-            var name = arguments["name"] as String;
-            var value = arguments["value"] as String == "true";
-            debugPrint("from jvm:on_state_changed,$name:$value");
-            gFFI.serverModel.changeStatue(name, value);
-            break;
-          }
-        case "on_android_permission_result":
-          {
-            var type = arguments["type"] as String;
-            var result = arguments["result"] as bool;
-            AndroidPermissionManager.complete(type, result);
-            break;
-          }
-        case "on_media_projection_canceled":
-          {
-            gFFI.serverModel.stopService();
-            break;
-          }
-        case "msgbox":
-          {
-            var type = arguments["type"] as String;
-            var title = arguments["title"] as String;
-            var text = arguments["text"] as String;
-            var link = (arguments["link"] ?? '') as String;
-            msgBox(gFFI.sessionId, type, title, text, link, gFFI.dialogManager);
-            break;
-          }
-        case "stop_service":
-          {
-            print(
-                "stop_service by kotlin, isStart:${gFFI.serverModel.isStart}");
-            if (gFFI.serverModel.isStart) {
-              gFFI.serverModel.stopService();
-            }
-            break;
-          }
-      }
-    } catch (e) {
-      debugPrintStack(label: "MethodCallHandler err:$e");
-    }
-    return "";
-  });
 }
 
 void showScamWarning(BuildContext context, ServerModel serverModel) {
