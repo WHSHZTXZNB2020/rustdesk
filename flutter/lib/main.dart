@@ -192,42 +192,16 @@ void runMainApp(bool startService) async {
   });
 }
 
-void runMobileApp() {
-  desktopType = DesktopType.main;
-  // mobile
-  _registerGlobalActions(gFFI.dialogManager);
-  final model = gFFI.ffiModel;
-  model.updateEventListener(gFFI.imageModel);
-  model.updateEventListener(gFFI.cursorModel);
-  model.updateEventListener(gFFI.canvasModel);
-  gFFI.dialogManager.setOverlayState(globalKey);
-  runApp(MultiProvider(
-    providers: [
-      ChangeNotifierProvider.value(value: gFFI.ffiModel),
-      ChangeNotifierProvider.value(value: gFFI.imageModel),
-      ChangeNotifierProvider.value(value: gFFI.cursorModel),
-      ChangeNotifierProvider.value(value: gFFI.canvasModel),
-      ChangeNotifierProvider.value(value: gFFI.peerTabModel),
-    ],
-    child: GetMaterialApp(
-      navigatorKey: globalKey,
-      debugShowCheckedModeBanner: false,
-      themeMode: MyTheme.currentThemeMode(),
-      theme: MyTheme.lightTheme,
-      darkTheme: MyTheme.darkTheme,
-      // 使用HomePage作为应用入口
-      home: HomePage(),
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: supportedLocales
-          .map((String string) => Locale(string.split('_').first,
-              string.contains('_') ? string.split('_').last : ''))
-          .toList(),
-    ),
-  ));
+void runMobileApp() async {
+  await initEnv(kAppTypeMain);
+  checkUpdate();
+  if (isAndroid) androidChannelInit();
+  if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
+  draggablePositions.load();
+  await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
+  gFFI.userModel.refreshCurrentUser();
+  runApp(App());
+  await initUniLinks();
 }
 
 void runMultiWindow(
@@ -604,33 +578,4 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
-}
-
-// 直接显示共享屏幕页面，不显示底部导航栏
-class MobileDirectServer extends StatelessWidget {
-  const MobileDirectServer({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: Text("赢商动力"),
-        // 右侧添加三点菜单按钮
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert), // 保持三点菜单图标
-            onPressed: () {
-              // 打开设置页面（使用HomePage作为入口）
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => HomePage()),
-              );
-            },
-          ),
-        ],
-      ),
-      body: ServerPage(),
-    );
-  }
 }
