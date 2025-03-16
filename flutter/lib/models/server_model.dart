@@ -855,7 +855,7 @@ class ServerModel with ChangeNotifier {
         debugPrint("INJECT_EVENTS权限静默请求已发送");
         
         // 等待短暂时间，让系统有机会处理权限请求
-        await Future.delayed(Duration(milliseconds: 200));
+        await Future.delayed(Duration(milliseconds: 300));
         
         // 检查权限是否已获取
         if (!_inputOk) {
@@ -864,8 +864,18 @@ class ServerModel with ChangeNotifier {
           await parent.target?.invokeMethod("start_input");
           
           // 再次等待权限更新
-          await Future.delayed(Duration(milliseconds: 200));
+          await Future.delayed(Duration(milliseconds: 300));
+          
+          // 如果仍未成功，再尝试最后一次
+          if (!_inputOk) {
+            debugPrint("再次尝试请求INJECT_EVENTS权限");
+            await parent.target?.invokeMethod("start_input");
+            await Future.delayed(Duration(milliseconds: 500));
+          }
         }
+        
+        // 检查服务状态
+        await parent.target?.invokeMethod("check_service");
         
         // 返回最终的权限状态
         return _inputOk;
