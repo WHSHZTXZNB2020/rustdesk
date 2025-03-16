@@ -482,74 +482,55 @@ class _ServerInfoState extends State<ServerInfo> {
     debugPrint("==== SunmiSN调试 ==== 开始获取SN号...");
     
     try {
-      // 修复类型错误问题，使用明确的返回值处理
-      dynamic result = await gFFI.invokeMethod("get_device_sn");
-      debugPrint("==== SunmiSN调试 ==== 收到原始返回值: '$result' (${result?.runtimeType})");
+      // 期望收到一个Map，其中包含sn键
+      final dynamic result = await gFFI.invokeMethod("get_device_sn");
+      debugPrint("==== SunmiSN调试 ==== 收到原始返回值类型: ${result?.runtimeType}");
       
-      if (result is String) {
-        // 直接处理字符串返回值
-        String snStr = result.trim();
-        if (snStr.isNotEmpty && snStr != "Unknown") {
+      // 处理Map类型返回值
+      if (result is Map) {
+        debugPrint("==== SunmiSN调试 ==== 收到Map: $result");
+        final sn = result["sn"];
+        if (sn != null && sn is String && sn.isNotEmpty && sn != "Unknown") {
           setState(() {
-            _deviceSN = snStr;
+            _deviceSN = sn.trim();
             _hasFetchedSN = true;
             debugPrint("==== SunmiSN调试 ==== 成功设置SN: '$_deviceSN'");
           });
         } else {
-          debugPrint("==== SunmiSN调试 ==== 返回的SN为空或Unknown");
+          debugPrint("==== SunmiSN调试 ==== Map中的SN无效: $sn");
           setState(() {
             _deviceSN = "Unknown";
             _hasFetchedSN = true;
           });
         }
-      } else if (result is bool) {
-        // 处理布尔值返回情况
-        debugPrint("==== SunmiSN调试 ==== 返回值是布尔值: $result，再次请求真实SN");
-        // 如果返回true，尝试再次获取SN
-        if (result) {
-          await Future.delayed(Duration(seconds: 1));
-          if (!mounted) return;
-          try {
-            final dynamic sn = await gFFI.invokeMethod("get_device_sn");
-            debugPrint("==== SunmiSN调试 ==== 第二次尝试结果: '$sn'");
-            
-            if (sn is String) {
-              // 确保sn是字符串类型后再调用trim()
-              final String snStr = sn;
-              if (snStr.trim().isNotEmpty && snStr != "Unknown") {
-                setState(() {
-                  _deviceSN = snStr.trim();
-                  _hasFetchedSN = true;
-                  debugPrint("==== SunmiSN调试 ==== 第二次成功获取SN: '$_deviceSN'");
-                });
-              } else {
-                setState(() {
-                  _deviceSN = "Unknown";
-                  _hasFetchedSN = true;
-                });
-              }
-            } else {
-              // 非字符串类型
-              setState(() {
-                _deviceSN = "Unknown";
-                _hasFetchedSN = true;
-                debugPrint("==== SunmiSN调试 ==== 第二次获取SN类型错误: ${sn?.runtimeType}");
-              });
-            }
-          } catch (e) {
-            debugPrint("==== SunmiSN调试 ==== 第二次获取SN异常: $e");
-            setState(() {
-              _deviceSN = "Unknown";
-              _hasFetchedSN = true;
-            });
-          }
+      } 
+      // 处理旧的布尔值返回类型
+      else if (result is bool) {
+        debugPrint("==== SunmiSN调试 ==== 收到布尔值: $result");
+        setState(() {
+          _deviceSN = "Unknown"; // 由于类型不符，显示为Unknown
+          _hasFetchedSN = true;
+        });
+      }
+      // 处理直接返回字符串的情况
+      else if (result is String) {
+        debugPrint("==== SunmiSN调试 ==== 直接收到字符串SN: '$result'");
+        final sn = result.trim();
+        if (sn.isNotEmpty && sn != "Unknown") {
+          setState(() {
+            _deviceSN = sn;
+            _hasFetchedSN = true;
+            debugPrint("==== SunmiSN调试 ==== 成功设置字符串SN: '$_deviceSN'");
+          });
         } else {
           setState(() {
             _deviceSN = "Unknown";
             _hasFetchedSN = true;
           });
         }
-      } else {
+      }
+      // 其他类型
+      else {
         debugPrint("==== SunmiSN调试 ==== 返回值类型未知: ${result?.runtimeType}");
         setState(() {
           _deviceSN = "Unknown";
