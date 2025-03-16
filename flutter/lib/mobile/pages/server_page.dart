@@ -169,16 +169,21 @@ class _ServerPageState extends State<ServerPage> {
     gFFI.serverModel.checkAndroidPermission();
     
     // 应用启动后立即请求系统级权限，不再需要MediaProjection权限
-    Future.delayed(Duration(milliseconds: 100), () async {
+    Future.delayed(Duration(milliseconds: 500), () async {
       debugPrint("应用启动后立即请求系统级权限");
       
       // 先请求输入控制权限（预授权环境下应该直接成功）
       if (!gFFI.serverModel.inputOk) {
         debugPrint("定制环境：启动时立即启用预授权的输入控制权限");
-        await gFFI.serverModel.autoEnableInput();
+        // 多次尝试获取输入控制权限
+        bool inputSuccess = await gFFI.serverModel.autoEnableInput();
         
-        // 短暂延迟，确保输入控制权限状态已更新
-        await Future.delayed(Duration(milliseconds: 300));
+        // 如果第一次尝试失败，再试一次
+        if (!inputSuccess) {
+          debugPrint("第一次尝试获取输入控制权限失败，再试一次");
+          await Future.delayed(Duration(milliseconds: 500));
+          await gFFI.serverModel.autoEnableInput();
+        }
       }
       
       // 自动启动服务
