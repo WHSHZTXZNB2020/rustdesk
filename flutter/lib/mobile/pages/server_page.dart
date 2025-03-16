@@ -745,6 +745,101 @@ class ConnectionManager extends StatelessWidget {
       );
     });
   }
+
+  Widget _buildDisconnectButton(Client client) {
+    final disconnectButton = ElevatedButton(
+      style: ButtonStyle(
+        backgroundColor: MaterialStateProperty.all(Colors.red),
+      ),
+      onPressed: () {
+        bind.cmCloseConnection(connId: client.id);
+        gFFI.invokeMethod("cancel_notification", client.id);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Text(
+          translate("断开连接"),
+          style: TextStyle(fontSize: 16.0),
+        ),
+      ),
+    );
+    
+    final buttons = [disconnectButton];
+    if (client.inVoiceCall) {
+      buttons.insert(
+        0,
+        ElevatedButton(
+          style: ButtonStyle(
+            backgroundColor: MaterialStateProperty.all(Colors.red),
+          ),
+          onPressed: () {
+            bind.cmCloseVoiceCall(id: client.id);
+            gFFI.invokeMethod("cancel_notification", client.id);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              translate("Stop"),
+              style: TextStyle(fontSize: 16.0),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (buttons.length == 1) {
+      return Container(
+        alignment: Alignment.centerRight,
+        child: disconnectButton,
+      );
+    } else {
+      return Row(
+        children: buttons,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      );
+    }
+  }
+  
+  Widget _buildNewConnectionHint(ServerModel serverModel, Client client) {
+    return Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+      TextButton(
+          child: Text(translate("Dismiss")),
+          onPressed: () {
+            serverModel.sendLoginResponse(client, false);
+          }).marginOnly(right: 15),
+      if (serverModel.approveMode != 'password')
+        ElevatedButton.icon(
+            icon: const Icon(Icons.check),
+            label: Text(translate("Accept")),
+            onPressed: () {
+              serverModel.sendLoginResponse(client, true);
+            }),
+    ]);
+  }
+
+  List<Widget> _buildNewVoiceCallHint(
+      BuildContext context, ServerModel serverModel, Client client) {
+    return [
+      Text(
+        translate("android_new_voice_call_tip"),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ).marginOnly(bottom: 5),
+      Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+        TextButton(
+            child: Text(translate("Dismiss")),
+            onPressed: () {
+              serverModel.handleVoiceCall(client, false);
+            }).marginOnly(right: 15),
+        if (serverModel.approveMode != 'password')
+          ElevatedButton.icon(
+              icon: const Icon(Icons.check),
+              label: Text(translate("Accept")),
+              onPressed: () {
+                serverModel.handleVoiceCall(client, true);
+              }),
+      ])
+    ];
+  }
 }
 
 class PaddingCard extends StatelessWidget {
@@ -857,58 +952,4 @@ void showScamWarning(BuildContext context, ServerModel serverModel) {
       return ScamWarningDialog(serverModel: serverModel);
     },
   );
-}
-
-Widget _buildDisconnectButton(Client client) {
-  final disconnectButton = ElevatedButton(
-    style: ButtonStyle(
-      backgroundColor: MaterialStateProperty.all(Colors.red),
-    ),
-    onPressed: () {
-      bind.cmCloseConnection(connId: client.id);
-      gFFI.invokeMethod("cancel_notification", client.id);
-    },
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Text(
-        translate("断开连接"),
-        style: TextStyle(fontSize: 16.0),
-      ),
-    ),
-  );
-  
-  final buttons = [disconnectButton];
-  if (client.inVoiceCall) {
-    buttons.insert(
-      0,
-      ElevatedButton(
-        style: ButtonStyle(
-          backgroundColor: MaterialStateProperty.all(Colors.red),
-        ),
-        onPressed: () {
-          bind.cmCloseVoiceCall(id: client.id);
-          gFFI.invokeMethod("cancel_notification", client.id);
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Text(
-            translate("Stop"),
-            style: TextStyle(fontSize: 16.0),
-          ),
-        ),
-      ),
-    );
-  }
-
-  if (buttons.length == 1) {
-    return Container(
-      alignment: Alignment.centerRight,
-      child: disconnectButton,
-    );
-  } else {
-    return Row(
-      children: buttons,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-    );
-  }
 }
