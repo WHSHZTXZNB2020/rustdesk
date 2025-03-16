@@ -176,37 +176,42 @@ fun getScreenSize(windowManager: WindowManager) : Pair<Int, Int>{
 
 // 获取设备SN号的函数
 fun getDeviceSN(): String {
+    var serial: String? = null
     try {
         val c = Class.forName("android.os.SystemProperties")
         val get = c.getMethod("get", String::class.java)
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {		
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {        
             try {
-                val serial = get.invoke(c, "ro.sunmi.serial") as String?
-                return serial ?: "Unknown"
+                serial = get.invoke(c, "ro.sunmi.serial") as String?
+                Log.d("SunmiSN", "Android 11+: 尝试获取SN: $serial")
             } catch (e: Exception) {
+                Log.e("SunmiSN", "Android 11+: 获取SN出错: ${e.message}")
                 e.printStackTrace()
             }
-            return "Unknown"
+            return serial ?: "Unknown"
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
-                val serial = Build.getSerial()
-                return serial
+                serial = Build.getSerial()
+                Log.d("SunmiSN", "Android 8-10: 尝试获取SN: $serial")
             } catch (e: Exception) {
+                Log.e("SunmiSN", "Android 8-10: 获取SN出错: ${e.message}")
                 e.printStackTrace()
             }
-            return "Unknown"
+            return serial ?: "Unknown"
         } else {
             // 安卓8以下使用相同方式
             try {
-                val serial = get.invoke(c, "ro.serialno") as String?
-                return serial ?: "Unknown"
+                serial = get.invoke(c, "ro.serialno") as String?
+                Log.d("SunmiSN", "Android <8: 尝试获取SN: $serial")
             } catch (e: Exception) {
+                Log.e("SunmiSN", "Android <8: 获取SN出错: ${e.message}")
                 e.printStackTrace()
             }
-            return "Unknown"
+            return serial ?: "Unknown"
         }
     } catch (e: Exception) {
+        Log.e("SunmiSN", "总异常: ${e.message}")
         e.printStackTrace()
         return "Unknown"
     }
