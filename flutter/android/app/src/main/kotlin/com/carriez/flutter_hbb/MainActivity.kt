@@ -475,7 +475,7 @@ class MainActivity : FlutterActivity() {
                         // 通过事件通道发送SN到Flutter
                         Handler(Looper.getMainLooper()).post {
                             try {
-                                MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mChannel").invokeMethod(
+                                MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, "mChannel").invokeMethod(
                                     "on_sn_received", 
                                     mapOf("sn" to sn)
                                 )
