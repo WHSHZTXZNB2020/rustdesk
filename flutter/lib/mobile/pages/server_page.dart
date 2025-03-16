@@ -990,5 +990,3 @@ void showScamWarning(BuildContext context, ServerModel serverModel) {
     },
   );
 }
-
-}
