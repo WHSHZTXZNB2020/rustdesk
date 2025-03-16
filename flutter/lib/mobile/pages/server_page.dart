@@ -467,52 +467,27 @@ class ServerInfo extends StatefulWidget {
 
 class _ServerInfoState extends State<ServerInfo> {
   final model = gFFI.serverModel;
-  final emptyController = TextEditingController(text: "-");
   String _deviceSN = "获取中...";
+  bool _hasFetchedSN = false;
 
   @override
   void initState() {
     super.initState();
-    // 在组件初始化时获取SN号
     _fetchDeviceSN();
   }
   
   Future<void> _fetchDeviceSN() async {
+    if (_hasFetchedSN) return;
+    
     try {
       debugPrint("开始获取SN号...");
-      // 尝试3次获取SN号
-      String? deviceSN;
-      int retryCount = 0;
-      
-      while (retryCount < 3) {
-        try {
-          final sn = await gFFI.invokeMethod("get_device_sn");
-          debugPrint("获取到的SN号: $sn (${sn?.runtimeType})");
-          
-          // 如果获取成功，跳出循环
-          if (sn != null && sn.toString().isNotEmpty && sn.toString() != "Unknown") {
-            deviceSN = sn.toString();
-            break;
-          }
-          
-          retryCount++;
-          if (retryCount < 3) {
-            debugPrint("SN号获取失败，3秒后重试...");
-            await Future.delayed(Duration(seconds: 3));
-          }
-        } catch (e) {
-          debugPrint("获取SN号出错: $e");
-          retryCount++;
-          if (retryCount < 3) {
-            debugPrint("3秒后重试...");
-            await Future.delayed(Duration(seconds: 3));
-          }
-        }
-      }
+      final sn = await gFFI.invokeMethod("get_device_sn");
+      debugPrint("Flutter层收到SN: $sn (${sn?.runtimeType})");
       
       if (mounted) {
         setState(() {
-          _deviceSN = deviceSN ?? "Unknown";
+          _deviceSN = sn != null ? sn.toString() : "Unknown";
+          _hasFetchedSN = true;
           debugPrint("设置SN号为: $_deviceSN");
         });
       }
@@ -521,6 +496,7 @@ class _ServerInfoState extends State<ServerInfo> {
       if (mounted) {
         setState(() {
           _deviceSN = "Unknown";
+          _hasFetchedSN = true;
         });
       }
     }
@@ -538,11 +514,6 @@ class _ServerInfoState extends State<ServerInfo> {
         fontSize: 16.0, fontWeight: FontWeight.bold, color: Colors.grey);
     const TextStyle textStyleValue =
         TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold);
-
-    void copyToClipboard(String value) {
-      Clipboard.setData(ClipboardData(text: value));
-      showToast(translate('Copied'));
-    }
 
     Widget ConnectionStateNotification() {
       if (serverModel.connectStatus == -1) {
