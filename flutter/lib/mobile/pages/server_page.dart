@@ -225,11 +225,12 @@ class _ServerPageState extends State<ServerPage> {
                 )));
   }
 
+  /// 设置SN号接收监听
   void _setupSNReceiver() {
     // 使用全局方法通道处理器
     // 确保只设置一次
     if (!_methodHandlerInitialized) {
-      setupSNHandler();
+      androidChannelInit();
       _methodHandlerInitialized = true;
     }
   }
@@ -504,16 +505,6 @@ class _ServerInfoState extends State<ServerInfo> {
     }
   }
   
-  /// 设置SN号接收监听
-  void _setupSNReceiver() {
-    // 使用全局方法通道处理器
-    // 确保只设置一次
-    if (!_methodHandlerInitialized) {
-      setupSNHandler();
-      _methodHandlerInitialized = true;
-    }
-  }
-  
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
@@ -596,9 +587,8 @@ class _ServerInfoState extends State<ServerInfo> {
 // 标记方法处理器是否已初始化
 bool _methodHandlerInitialized = false;
 
-// 设置全局SN处理器
-void setupSNHandler() {
-  // 不再使用原始处理器
+// 将androidChannelInit声明为顶级公开函数
+void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
     debugPrint("flutter got android msg: $method, $arguments");
     try {
