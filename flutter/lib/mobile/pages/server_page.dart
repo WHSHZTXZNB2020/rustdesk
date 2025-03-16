@@ -90,7 +90,7 @@ class _ServerPageState extends State<ServerPage> {
                         gFFI.serverModel.isStart
                             ? ServerInfo()
                             : ServiceNotRunningNotification(),
-                        const ConnectionManager(),
+                        ConnectionManager(),
                         const PermissionChecker(),
                         SizedBox.fromSize(size: const Size(0, 15.0)),
                       ],
@@ -481,7 +481,7 @@ class _ServerInfoState extends State<ServerInfo> {
             children: [
               Expanded(
                 child: Text(
-                  (serverModel.serverId.isEmpty) ? 'loading...' : serverModel.serverId,
+                  serverModel.serverId.id.isEmpty ? 'loading...' : serverModel.serverId.id,
                   style: textStyleValue,
                 ),
               ),
@@ -644,241 +644,55 @@ class _PermissionCheckerState extends State<PermissionChecker> {
   }
 }
 
-class ConnectionManager extends StatefulWidget {
-  ConnectionManager({Key? key}) : super(key: key);
-
-  @override
-  State<StatefulWidget> createState() => _ConnectionManagerState();
-}
-
-class _ConnectionManagerState extends State<ConnectionManager>
-    with SingleTickerProviderStateMixin {
-  final tabController = ScrollController();
-
-  final List<Widget> children = [SendTabPage(), RecvTabPage()];
-
-  var clients = List<Client>.empty();
-  var fakeClientMode = false;
-
-  @override
-  void initState() {
-    super.initState();
-
-    if (isAndroid) {
-      gFFI.serverModel.updateClientState();
-    }
-  }
+class ConnectionManager extends StatelessWidget {
+  const ConnectionManager({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final getClientIcon = gFFI.serverModel.getClientIcon;
-    return PaddingCard(
-      title: translate('Connections'),
-      child: Consumer<ServerModel>(builder: (context, model, child) {
-        if (!isAndroid) {
-          model.updateClientState();
-        }
-        clients = model.clients.toList();
-        return Column(
-          children: [
-            FutureBuilder<bool>(
-              future: Future.value(false),
-              builder: (context, snapshot) {
-                fakeClientMode = snapshot.data ?? false;
-                return SingleChildScrollView(
-                  controller: tabController,
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: clients.isEmpty
-                      ? Center(
-                          child: Text(translate('Empty'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                              )))
-                      : Column(
-                          children: clients
-                              .map((client) => Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(6),
-                                            decoration: BoxDecoration(
-                                              color: str2color('${client.peerId}${client.id}', 0x7f),
-                                              borderRadius: BorderRadius.circular(5),
-                                            ),
-                                            child: Center(
-                                              child: Icon(
-                                                getClientIcon(client),
-                                                color: Colors.white,
-                                                size: 28,
-                                              ),
-                                            ),
-                                          ),
-                                          Expanded(
-                                            child: Container(
-                                              margin: const EdgeInsets.only(left: 10),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: Text(
-                                                          client.name
-                                                              .overflow,
-                                                          style: const TextStyle(
-                                                              fontSize: 18,
-                                                              overflow: TextOverflow
-                                                                  .ellipsis),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                    height: 2,
-                                                  ),
-                                                  Text(
-                                                    client.peerId.isEmpty
-                                                        ? '${translate("ID")}: ${translate("Root/Administrator")}'
-                                                        : '${translate("ID")}: ${client.peerId}',
-                                                    style: TextStyle(
-                                                        color: MyTheme
-                                                            .darkGray),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                          _buildDisconnectButton(
-                                              client),
-                                        ],
-                                      ),
-                                      client.isFileTransfer
-                                          ? _buildNewConnectionHint(
-                                              client)
-                                          : client.type == ClientType.remote
-                                              ? client.inVoiceCall && client.incomingVoiceCall
-                                                  ? _buildNewVoiceCallHint(client)
-                                                  : const SizedBox.shrink()
-                                              : const SizedBox.shrink(),
-                                      const Divider(),
-                                    ],
-                                  ))
-                              .toList(),
-                        ),
-                );
-              },
-            ),
-          ],
-        );
-      }),
-    );
-  }
+    return Consumer<ServerModel>(builder: (context, serverModel, child) {
+      final clients = serverModel.clients;
+      if (clients.isEmpty) return const SizedBox.shrink();
 
-  Widget _buildDisconnectButton(Client client) {
-    return TextButton(
-      onPressed: () {
-        onDisconnect(client);
-      },
-      child: Text(
-        translate('Disconnect'),
-        style: TextStyle(
-          color: Colors.red,
+      return PaddingCard(
+        title: translate("Connections"),
+        child: Column(
+          children: clients.map((client) {
+            return Column(
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.computer, color: Colors.white),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(client.name, 
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text(client.peerId,
+                            style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      child: Text(translate("Disconnect"), 
+                        style: TextStyle(color: Colors.red)),
+                      onPressed: () {
+                        bind.cmCloseConnection(connId: client.id);
+                      },
+                    )
+                  ],
+                ),
+                Divider(),
+              ],
+            );
+          }).toList(),
         ),
-      ),
-    );
-  }
-
-  Widget _buildNewConnectionHint(Client client) {
-    return Container(
-      margin: const EdgeInsets.only(top: 6, bottom: 3),
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      decoration: BoxDecoration(
-        color: MyTheme.accent50,
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 5),
-            child: Icon(Icons.info_outline,
-                color: MyTheme.accent, size: 16),
-          ),
-          Expanded(
-            child: Text(
-              translate("New Connection"),
-              style: TextStyle(
-                  fontSize: 12, color: MyTheme.accent50Reverse),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNewVoiceCallHint(Client client) {
-    return Container(
-      margin: const EdgeInsets.only(top: 6, bottom: 3),
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      decoration: BoxDecoration(
-        color: isMobile ? MyTheme.accent50 : null,
-        border: Border.fromBorderSide(
-            BorderSide(color: MyTheme.accent, width: 1.5)),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              minimumSize: Size.zero,
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () async {
-              await onVoiceCallResponse(
-                  client, true, client.incomingVoiceCall);
-            },
-            icon: Icon(Icons.check, color: Colors.green),
-            label: Text(
-              translate("Accept"),
-              style: TextStyle(color: Colors.green),
-            ),
-          ),
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              minimumSize: Size.zero,
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () async {
-              await onVoiceCallResponse(
-                  client, false, client.incomingVoiceCall);
-            },
-            icon: Icon(Icons.close, color: Colors.red),
-            label: Text(translate("Decline"),
-                style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  onDisconnect(Client client) {
-    client.sendDisconnect();
-  }
-
-  onVoiceCallResponse(
-      Client client, bool accept, bool isIncoming) async {
-    if (accept) {
-      await handleVoiceCall(client, true, isIncoming);
-    } else {
-      await client.closeVoiceCall();
-    }
+      );
+    });
   }
 }
 
