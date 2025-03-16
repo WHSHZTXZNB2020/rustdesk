@@ -481,7 +481,7 @@ class _ServerInfoState extends State<ServerInfo> {
             children: [
               Expanded(
                 child: Text(
-                  serverModel.serverId.id.isEmpty ? 'loading...' : serverModel.serverId.id,
+                  serverModel.serverId.text.isEmpty ? 'loading...' : serverModel.serverId.text,
                   style: textStyleValue,
                 ),
               ),
@@ -777,11 +777,11 @@ class ClientInfo extends StatelessWidget {
                       padding: const EdgeInsets.only(right: 12),
                       child: CircleAvatar(
                           backgroundColor: str2color(
-                              client.name,
+                              client.name.isNotEmpty ? client.name : "?",
                               Theme.of(context).brightness == Brightness.light
                                   ? 255
                                   : 150),
-                          child: Text(client.name[0])))),
+                          child: Text(client.name.isNotEmpty ? client.name[0] : "?")))),
               Expanded(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
