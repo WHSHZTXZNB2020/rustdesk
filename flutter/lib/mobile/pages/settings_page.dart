@@ -141,9 +141,16 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         update = true;
       }
 
-      // start on boot depends on ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS and SYSTEM_ALERT_WINDOW
+      // 默认开启开机自启动 - 从SharedPreferences获取值，默认为true
       var enableStartOnBoot =
-          await gFFI.invokeMethod(AndroidChannel.kGetStartOnBootOpt);
+          await gFFI.invokeMethod(AndroidChannel.kGetStartOnBootOpt) ?? true;
+      
+      // 如果还没设置过，则设置为true
+      if (enableStartOnBoot == null) {
+        enableStartOnBoot = true;
+        await gFFI.invokeMethod(AndroidChannel.kSetStartOnBootOpt, true);
+      }
+      
       if (enableStartOnBoot) {
         if (!await canStartOnBoot()) {
           enableStartOnBoot = false;
@@ -628,7 +635,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   title: Text(translate("版本: ") + version),
   value: Padding(
     padding: EdgeInsets.symmetric(vertical: 8),
-    child: Text('远程控制定制联系微信“Haisong-8”',
+    child: Text('远程控制定制联系微信"Haisong-8"',
         style: TextStyle()), // 移除了下划线样式
   ),
   leading: Icon(Icons.info),
@@ -754,7 +761,7 @@ void showAbout(OverlayDialogManager dialogManager) {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Text(
-                '远程控制定制联系微信“Haisong-8”', // 显示文本
+                '远程控制定制联系微信"Haisong-8"', // 显示文本
                 style: TextStyle(), // 移除了下划线样式
               ),
             ),
