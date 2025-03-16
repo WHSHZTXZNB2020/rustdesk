@@ -88,30 +88,28 @@ class HomePageState extends State<HomePage> {
           appBar: AppBar(
             centerTitle: true,
             title: Text("赢商动力"),
-            actions: _pages.elementAt(_selectedIndex).appBarActions,
-          ),
-          bottomNavigationBar: BottomNavigationBar(
-            key: navigationBarKey,
-            items: _pages
-                .map((page) =>
-                    BottomNavigationBarItem(icon: page.icon, label: page.title))
-                .toList(),
-            currentIndex: _selectedIndex,
-            type: BottomNavigationBarType.fixed,
-            selectedItemColor: MyTheme.accent, //
-            unselectedItemColor: MyTheme.darkGray,
-            onTap: (index) => setState(() {
-              // close chat overlay when go chat page
-              if (_selectedIndex != index) {
-                _selectedIndex = index;
-                if (isChatPageCurrentTab) {
-                  gFFI.chatModel.hideChatIconOverlay();
-                  gFFI.chatModel.hideChatWindowOverlay();
-                  gFFI.chatModel.mobileClearClientUnread(
-                      gFFI.chatModel.currentKey.connId);
-                }
-              }
-            }),
+            actions: [
+              // 右侧菜单按钮，点击后直接跳转到设置页面
+              PopupMenuButton<String>(
+                tooltip: "",
+                icon: const Icon(Icons.more_vert),
+                itemBuilder: (context) {
+                  return [
+                    PopupMenuItem(
+                      value: "settings",
+                      child: Text(translate("Settings")),
+                    ),
+                  ];
+                },
+                onSelected: (value) {
+                  if (value == "settings") {
+                    setState(() {
+                      _selectedIndex = _pages.length - 1; // 跳转到设置页面
+                    });
+                  }
+                },
+              ),
+            ],
           ),
           body: _pages.elementAt(_selectedIndex),
         ));
