@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:bot_toast/bot_toast.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -9,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
-import 'package:flutter_hbb/desktop/pages/server_page.dart' as desktop_server_page;
+import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
@@ -24,7 +25,7 @@ import 'package:window_manager/window_manager.dart';
 import 'common.dart';
 import 'consts.dart';
 import 'mobile/pages/home_page.dart';
-import 'mobile/pages/server_page.dart' as mobile_server_page;
+import 'mobile/pages/server_page.dart';
 import 'models/platform_model.dart';
 
 import 'package:flutter_hbb/plugin/handlers.dart'
@@ -194,7 +195,7 @@ void runMainApp(bool startService) async {
 void runMobileApp() async {
   await initEnv(kAppTypeMain);
   checkUpdate();
-  if (isAndroid) mobile_server_page.androidChannelInit();
+  if (isAndroid) androidChannelInit();
   if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
   draggablePositions.load();
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
@@ -277,7 +278,7 @@ void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);
   _runApp(
     '',
-    const desktop_server_page.DesktopServerPage(),
+    const ServerPage(),
     MyTheme.currentThemeMode(),
   );
   final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
@@ -578,4 +579,121 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
+}
+
+// 直接显示共享屏幕页面，不显示底部导航栏
+class MobileDirectServer extends StatelessWidget {
+  const MobileDirectServer({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: Text("赢商动力"),
+        // 右侧添加三点菜单按钮
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.more_vert), // 保持三点菜单图标
+            onPressed: () {
+              // 直接打开设置页面
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
+              );
+            },
+          ),
+        ],
+      ),
+      body: ServerPage(),
+    );
+  }
+}
+
+// 简单的设置页面
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(translate("Settings")),
+      ),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: Icon(Icons.language),
+            title: Text(translate("Language")),
+            onTap: () => showLanguageSettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.color_lens),
+            title: Text(translate("Theme")),
+            onTap: () => showThemeSettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.wifi),
+            title: Text(translate("Network")),
+            onTap: () => showNetworkSettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.security),
+            title: Text(translate("Security")),
+            onTap: () => showSecuritySettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.perm_identity),
+            title: Text(translate("ID/Relay Server")),
+            onTap: () => showServerSettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.account_box),
+            title: Text(translate("Account")),
+            onTap: () => showAccountSettings(context),
+          ),
+          ListTile(
+            leading: Icon(Icons.info),
+            title: Text(translate("About")),
+            onTap: () => showAbout(context),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void showLanguageSettings(BuildContext context) {
+    // 打开语言设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "language");
+  }
+  
+  void showThemeSettings(BuildContext context) {
+    // 打开主题设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "theme");
+  }
+  
+  void showNetworkSettings(BuildContext context) {
+    // 打开网络设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "network");
+  }
+  
+  void showSecuritySettings(BuildContext context) {
+    // 打开安全设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "security");
+  }
+  
+  void showServerSettings(BuildContext context) {
+    // 打开服务器设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "server");
+  }
+  
+  void showAccountSettings(BuildContext context) {
+    // 打开账户设置
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "account");
+  }
+  
+  void showAbout(BuildContext context) {
+    // 打开关于页面
+    gFFI.dialogManager.toggleMobileSettingsDialog(context, "about");
+  }
 }
