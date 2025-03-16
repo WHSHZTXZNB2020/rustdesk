@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
-import 'package:flutter_hbb/desktop/pages/server_page.dart';
+import 'package:flutter_hbb/desktop/pages/server_page.dart' as desktop_server_page;
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
@@ -24,11 +24,11 @@ import 'package:window_manager/window_manager.dart';
 import 'common.dart';
 import 'consts.dart';
 import 'mobile/pages/home_page.dart';
-import 'mobile/pages/server_page.dart';
+import 'mobile/pages/server_page.dart' as mobile_server_page;
 import 'models/platform_model.dart';
 
 import 'package:flutter_hbb/plugin/handlers.dart'
-    if (dart.library.html) 'package:flutter_hbb/web/plugin/handlers.dart';
+    if (dart.library.html) 'package:flutter_hbb/plugin/web/handlers.dart';
 
 /// Basic window and launch properties.
 int? kWindowId;
@@ -194,7 +194,7 @@ void runMainApp(bool startService) async {
 void runMobileApp() async {
   await initEnv(kAppTypeMain);
   checkUpdate();
-  if (isAndroid) androidChannelInit();
+  if (isAndroid) mobile_server_page.androidChannelInit();
   if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
   draggablePositions.load();
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
@@ -277,7 +277,7 @@ void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);
   _runApp(
     '',
-    const DesktopServerPage(),
+    const desktop_server_page.DesktopServerPage(),
     MyTheme.currentThemeMode(),
   );
   final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
