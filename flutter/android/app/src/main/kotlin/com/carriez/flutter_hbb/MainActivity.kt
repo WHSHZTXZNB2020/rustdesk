@@ -465,7 +465,9 @@ class MainActivity : FlutterActivity() {
                 }
                 "get_device_sn" -> {
                     // 获取设备SN号
-                    result.success(getDeviceSN())
+                    val sn = getDeviceSN()
+                    Log.d("SunmiSN", "获取到的SN号: $sn")
+                    result.success(sn)
                 }
                 else -> {
                     result.error("-1", "No such method", null)
