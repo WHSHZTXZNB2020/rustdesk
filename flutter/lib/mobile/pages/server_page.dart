@@ -479,10 +479,14 @@ class _ServerInfoState extends State<ServerInfo> {
   
   Future<void> _fetchDeviceSN() async {
     try {
+      debugPrint("开始获取SN号...");
       final sn = await gFFI.invokeMethod("get_device_sn");
+      debugPrint("获取到的SN号: $sn (${sn.runtimeType})");
+      
       if (mounted) {
         setState(() {
           _deviceSN = sn != null ? sn.toString() : "Unknown";
+          debugPrint("设置SN号为: $_deviceSN");
         });
       }
     } catch (e) {
