@@ -42,6 +42,27 @@ class HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _selectedIndex = 0; // 确保始终从远程协助页面启动
+    
+    // disable scaling gesture
+    if (Platform.isAndroid) {
+      GestureBinding.instance.resamplingEnabled = false;
+    }
+    cm_responding_field = Get.put(CM_Responding());
+    gFFI.ffiModel.updateEventListener(gFFI.sessionId, (event) {
+      switch (event.field0) {
+        case "chat_client_close":
+          final id = int.parse(event.field1);
+          gFFI.chatModel.hideChatWindowByClientId(id);
+          break;
+        case "chat_server_close":
+          final id = int.parse(event.field1);
+          gFFI.chatModel.hideChatWindowByClientId(id);
+          break;
+        default:
+          break;
+      }
+    });
     initPages();
   }
 
@@ -109,29 +130,6 @@ class HomePageState extends State<HomePage> {
                 },
               ),
             ],
-          ),
-          bottomNavigationBar: BottomNavigationBar(
-            key: navigationBarKey,
-            items: _pages
-                .map((page) =>
-                    BottomNavigationBarItem(icon: page.icon, label: page.title))
-                .toList(),
-            currentIndex: _selectedIndex,
-            type: BottomNavigationBarType.fixed,
-            selectedItemColor: MyTheme.accent, //
-            unselectedItemColor: MyTheme.darkGray,
-            onTap: (index) => setState(() {
-              // close chat overlay when go chat page
-              if (_selectedIndex != index) {
-                _selectedIndex = index;
-                if (isChatPageCurrentTab) {
-                  gFFI.chatModel.hideChatIconOverlay();
-                  gFFI.chatModel.hideChatWindowOverlay();
-                  gFFI.chatModel.mobileClearClientUnread(
-                      gFFI.chatModel.currentKey.connId);
-                }
-              }
-            }),
           ),
           body: _pages.elementAt(_selectedIndex),
         ));
