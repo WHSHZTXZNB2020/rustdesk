@@ -449,22 +449,27 @@ class _ServerInfoState extends State<ServerInfo> {
     }
 
     return PaddingCard(
-        title: cardTitle, // 动态设置标题，可能为空
-        titleTextStyle: const TextStyle(fontSize: 14.0, fontWeight: FontWeight.bold),
+        title: cardTitle, // 动态设置标题
+        // 设置标题字体大小为18px
+        titleTextStyle: const TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
+        // 移除标题图标
+        titleIcon: null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // SN号显示在标题下方，仅当有SN时显示
+            // SN号显示在标题下方，仅当有SN时显示，减少间距
             if (_deviceSN.isNotEmpty && _deviceSN != "Unknown")
               Padding(
-                padding: const EdgeInsets.only(bottom: 20),
+                // 减少顶部和底部间距
+                padding: const EdgeInsets.only(bottom: 10, top: 0),
                 child: Text(
                   _deviceSN,
+                  // 保持SN字体为25.0
                   style: const TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold),
                 ),
               ),
             
-            // ID
+            // ID - 保留左侧图标
             Row(children: [
               const Icon(Icons.perm_identity,
                       color: Colors.grey, size: iconSize)
@@ -610,7 +615,9 @@ class _PermissionCheckerState extends State<PermissionChecker> {
     final serverModel = Provider.of<ServerModel>(context);
     final hasAudioPermission = androidVersion >= 30;
     return PaddingCard(
-        title: translate("Permissions"),
+        title: translate("权限"),
+        // 只移除标题图标
+        titleIcon: null,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           serverModel.mediaOk
               ? ElevatedButton.icon(
@@ -637,6 +644,7 @@ class _PermissionCheckerState extends State<PermissionChecker> {
               ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
                   serverModel.toggleAudio)
               : Row(children: [
+                  // 保留内部图标
                   Icon(Icons.info_outline).marginOnly(right: 15),
                   Expanded(
                       child: Text(
@@ -671,7 +679,7 @@ class PermissionRow extends StatelessWidget {
         value: isOk,
         onChanged: null, // 设置为null使开关变为只读
       );
-    }
+     }
     
     return SwitchListTile(
         visualDensity: VisualDensity.compact,
@@ -690,142 +698,76 @@ class ConnectionManager extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
-    return Column(
-        children: serverModel.clients
-            .map((client) => PaddingCard(
-                title: translate(client.isFileTransfer
-                    ? "File Connection"
-                    : "Screen Connection"),
-                titleIcon: client.isFileTransfer
-                    ? Icon(Icons.folder_outlined)
-                    : Icon(Icons.mobile_screen_share),
-                child: Column(children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(child: ClientInfo(client)),
-                      Expanded(
-                          flex: -1,
-                          child: client.isFileTransfer || !client.authorized
-                              ? const SizedBox.shrink()
-                              : IconButton(
-                                  onPressed: () {
-                                    gFFI.chatModel.changeCurrentKey(
-                                        MessageKey(client.peerId, client.id));
-                                    final bar = navigationBarKey.currentWidget;
-                                    if (bar != null) {
-                                      bar as BottomNavigationBar;
-                                      bar.onTap!(1);
-                                    }
-                                  },
-                                  icon: unreadTopRightBuilder(
-                                      client.unreadChatMessageCount)))
-                    ],
-                  ),
-                  client.authorized
-                      ? const SizedBox.shrink()
-                      : Text(
-                          translate("android_new_connection_tip"),
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ).marginOnly(bottom: 5),
-                  client.authorized
-                      ? _buildDisconnectButton(client)
-                      : _buildNewConnectionHint(context, serverModel, client),
-                  if (client.incomingVoiceCall && !client.inVoiceCall)
-                    ..._buildNewVoiceCallHint(context, serverModel, client),
-                ])))
-            .toList());
-  }
-
-  Widget _buildDisconnectButton(Client client) {
-    final disconnectButton = ElevatedButton.icon(
-      style: ButtonStyle(backgroundColor: MaterialStatePropertyAll(Colors.red)),
-      icon: const Icon(Icons.close),
-      onPressed: () {
-        bind.cmCloseConnection(connId: client.id);
-        gFFI.invokeMethod("cancel_notification", client.id);
-      },
-      label: Text(translate("Disconnect")),
+    if (serverModel.clients.isEmpty) return Offstage();
+    return PaddingCard(
+      title: translate("Connections"),
+      // 保留默认图标
+      // titleIcon: null,
+      child: Column(
+        children: [
+          ...serverModel.clients.map(
+            (client) => Column(
+              children: [
+                ClientInfo(client),
+                (client.authStatus == AuthStatus.Other ||
+                        client.authStatus == AuthStatus.Waiting)
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                              onPressed: () =>
+                                  serverModel.sendLoginResponse(client, false),
+                              child: Text(translate("Dismiss"))),
+                          TextButton(
+                              onPressed: () =>
+                                  serverModel.sendLoginResponse(client, true),
+                              child: Row(
+                                children: [
+                                  Text(translate("Accept")),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.done, size: 18),
+                                ],
+                              ))
+                        ],
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (client.inVoiceCall)
+                            TextButton(
+                              onPressed: () {
+                                serverModel.closeVoiceCall();
+                              },
+                              child: Row(
+                                children: [
+                                  Text(translate("Close Voice Call")),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.close, size: 18),
+                                ],
+                              ),
+                            ),
+                          const SizedBox(width: 4),
+                          TextButton(
+                            onPressed: () {
+                              serverModel.sendDisconnect(client.id);
+                            },
+                            child: Row(
+                              children: [
+                                Text(translate("Disconnect")),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.link_off, size: 18),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                const Divider(),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
-    final buttons = [disconnectButton];
-    if (client.inVoiceCall) {
-      buttons.insert(
-        0,
-        ElevatedButton.icon(
-          style: ButtonStyle(
-              backgroundColor: MaterialStatePropertyAll(Colors.red)),
-          icon: const Icon(Icons.phone),
-          label: Text(translate("Stop")),
-          onPressed: () {
-            bind.cmCloseVoiceCall(id: client.id);
-            gFFI.invokeMethod("cancel_notification", client.id);
-          },
-        ),
-      );
-    }
-
-    if (buttons.length == 1) {
-      return Container(
-        alignment: Alignment.centerRight,
-        child: disconnectButton,
-      );
-    } else {
-      return Row(
-        children: buttons,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      );
-    }
-  }
-
-  Widget _buildNewConnectionHint(BuildContext context, ServerModel serverModel, Client client) {
-    // 如果客户端已经授权，直接显示断开连接按钮，避免状态不一致
-    if (client.authorized) {
-      return _buildDisconnectButton(client);
-    }
-    
-    return Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-      TextButton(
-          child: Text(translate("Dismiss")),
-          onPressed: () {
-            serverModel.sendLoginResponse(client, false);
-          }).marginOnly(right: 15),
-      if (serverModel.approveMode != 'password')
-        ElevatedButton.icon(
-            icon: const Icon(Icons.check),
-            label: Text(translate("Accept")),
-            onPressed: () {
-              // 先本地更新UI状态，以提供即时反馈
-              client.authorized = true;
-              // 向服务器发送连接响应
-              serverModel.sendLoginResponse(client, true);
-              // 强制刷新UI
-              (context as Element).markNeedsBuild();
-            }),
-    ]);
-  }
-
-  List<Widget> _buildNewVoiceCallHint(
-      BuildContext context, ServerModel serverModel, Client client) {
-    return [
-      Text(
-        translate("android_new_voice_call_tip"),
-        style: Theme.of(context).textTheme.bodyMedium,
-      ).marginOnly(bottom: 5),
-      Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-        TextButton(
-            child: Text(translate("Dismiss")),
-            onPressed: () {
-              serverModel.handleVoiceCall(client, false);
-            }).marginOnly(right: 15),
-        if (serverModel.approveMode != 'password')
-          ElevatedButton.icon(
-              icon: const Icon(Icons.check),
-              label: Text(translate("Accept")),
-              onPressed: () {
-                serverModel.handleVoiceCall(client, true);
-              }),
-      ])
-    ];
   }
 }
 
@@ -853,6 +795,7 @@ class PaddingCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              // 恢复默认图标显示逻辑，让特定组件自己控制是否显示图标
               if (titleIcon != null)
                 titleIcon!.marginOnly(right: 10)
               else
