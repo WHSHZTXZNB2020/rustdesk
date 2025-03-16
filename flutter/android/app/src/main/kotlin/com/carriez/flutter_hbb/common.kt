@@ -180,51 +180,42 @@ fun getScreenSize(windowManager: WindowManager) : Pair<Int, Int>{
 /**
  * 获取商米设备SN号
  */
-@SuppressLint("HardwareIds", "DiscouragedPrivateApi")
+@SuppressLint("HardwareIds")
 fun getDeviceSN(context: Context): String {
     var serial = "Unknown"
     try {
-        // 尝试通过反射获取SystemProperties类和get方法
-        Log.d("SunmiSN", "尝试通过反射获取SN号")
+        // 尝试通过反射获取SystemProperties类的get方法
         val c = Class.forName("android.os.SystemProperties")
         val get = c.getMethod("get", String::class.java, String::class.java)
+        
+        // 尝试获取不同属性名下的SN
         serial = get.invoke(c, "ro.serialno", "Unknown") as String
         
         if (serial == "Unknown" || serial.isEmpty()) {
-            Log.d("SunmiSN", "反射方式1失败，尝试其他属性名")
             serial = get.invoke(c, "ro.boot.serialno", "Unknown") as String
         }
         
-        // 如果通过反射未获取到，尝试通过Build类获取（需要权限）
+        // 如果通过反射未获取到，尝试通过Build类获取
         if (serial == "Unknown" || serial.isEmpty()) {
-            Log.d("SunmiSN", "反射方式2失败，尝试通过Build类获取")
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 // Android 8.0以下
                 @Suppress("DEPRECATION")
                 serial = Build.SERIAL
-                Log.d("SunmiSN", "Android <8: 尝试获取SN: '$serial'")
             } else {
                 // Android 8.0及以上，需要权限
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) 
                     == PackageManager.PERMISSION_GRANTED) {
                     serial = Build.getSerial()
-                    Log.d("SunmiSN", "Android >=8: 尝试获取SN: '$serial'")
-                } else {
-                    Log.d("SunmiSN", "缺少READ_PHONE_STATE权限，无法获取SN")
                 }
             }
         }
         
         // 确保serial不为空字符串
         if (serial.isEmpty()) {
-            Log.d("SunmiSN", "获取到的SN为空，设为Unknown")
             serial = "Unknown"
-        } else {
-            Log.d("SunmiSN", "成功获取到SN: '$serial'")
         }
     } catch (e: Exception) {
         Log.e("SunmiSN", "获取SN异常: ${e.message}")
-        e.printStackTrace()
     }
     
     return serial
