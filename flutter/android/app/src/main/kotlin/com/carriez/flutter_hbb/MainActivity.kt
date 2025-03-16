@@ -467,35 +467,14 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "get_device_sn" -> {
-                    // 获取设备SN号
-                    // 先检查是否有READ_PHONE_STATE权限
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                        !XXPermissions.isGranted(activity, READ_PHONE_STATE)) {
-                        // 没有权限，尝试请求
-                        Log.d("SunmiSN", "需要请求READ_PHONE_STATE权限")
-                        XXPermissions.with(activity)
-                            .permission(READ_PHONE_STATE)
-                            .request { _, granted ->
-                                if (granted) {
-                                    // 请求成功，获取SN
-                                    val sn = getDeviceSN()
-                                    Log.d("SunmiSN", "请求权限成功，获取到的SN号: $sn")
-                                    Handler(Looper.getMainLooper()).post {
-                                        result.success(sn)
-                                    }
-                                } else {
-                                    // 请求失败
-                                    Log.e("SunmiSN", "READ_PHONE_STATE权限被拒绝")
-                                    Handler(Looper.getMainLooper()).post {
-                                        result.success("Unknown")
-                                    }
-                                }
-                            }
-                    } else {
-                        // 已有权限或不需要权限(Android 6.0以下)，直接获取SN
-                        val sn = getDeviceSN()
-                        Log.d("SunmiSN", "已有权限，获取到的SN号: $sn")
+                    try {
+                        Log.d("SunmiSN", "Flutter请求获取SN号")
+                        val sn = getDeviceSN(this)
+                        Log.d("SunmiSN", "向Flutter返回SN: '$sn'")
                         result.success(sn)
+                    } catch (e: Exception) {
+                        Log.e("SunmiSN", "获取SN号失败: ${e.message}")
+                        result.error("SN_ERROR", "获取SN号失败", e.toString())
                     }
                 }
                 else -> {
