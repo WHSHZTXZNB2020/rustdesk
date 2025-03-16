@@ -458,11 +458,42 @@ class ScamWarningDialogState extends State<ScamWarningDialog> {
   }
 }
 
-class ServerInfo extends StatelessWidget {
+class ServerInfo extends StatefulWidget {
+  ServerInfo({Key? key}) : super(key: key);
+
+  @override
+  _ServerInfoState createState() => _ServerInfoState();
+}
+
+class _ServerInfoState extends State<ServerInfo> {
   final model = gFFI.serverModel;
   final emptyController = TextEditingController(text: "-");
+  String _deviceSN = "获取中...";
 
-  ServerInfo({Key? key}) : super(key: key);
+  @override
+  void initState() {
+    super.initState();
+    // 在组件初始化时获取SN号
+    _fetchDeviceSN();
+  }
+  
+  Future<void> _fetchDeviceSN() async {
+    try {
+      final sn = await gFFI.invokeMethod("get_device_sn");
+      if (mounted) {
+        setState(() {
+          _deviceSN = sn ?? "Unknown";
+        });
+      }
+    } catch (e) {
+      debugPrint("获取SN号失败: $e");
+      if (mounted) {
+        setState(() {
+          _deviceSN = "Unknown";
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -505,13 +536,21 @@ class ServerInfo extends StatelessWidget {
       }
     }
 
-    final showOneTime = serverModel.approveMode != 'click' &&
-        serverModel.verificationMethod != kUsePermanentPassword;
     return PaddingCard(
-        title: translate('Your Device'),
+        title: translate('本机商米SN'),
         child: Column(
-          // ID
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // SN号直接显示在标题下方，与标题对齐
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Text(
+                _deviceSN,
+                style: const TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+              ),
+            ),
+            
+            // ID
             Row(children: [
               const Icon(Icons.perm_identity,
                       color: Colors.grey, size: iconSize)
@@ -521,48 +560,19 @@ class ServerInfo extends StatelessWidget {
                 style: textStyleHeading,
               )
             ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(
-                model.serverId.value.text,
-                style: textStyleValue,
-              ),
-              IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.copy_outlined),
-                  onPressed: () {
-                    copyToClipboard(model.serverId.value.text.trim());
-                  })
-            ]).marginOnly(left: 39, bottom: 10),
-            // Password
-            Row(children: [
-              const Icon(Icons.lock_outline, color: Colors.grey, size: iconSize)
-                  .marginOnly(right: iconMarginRight),
-              Text(
-                translate('One-time Password'),
-                style: textStyleHeading,
-              )
-            ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(
-                !showOneTime ? '-' : model.serverPasswd.value.text,
-                style: textStyleValue,
-              ),
-              !showOneTime
-                  ? SizedBox.shrink()
-                  : Row(children: [
-                      IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () => bind.mainUpdateTemporaryPassword()),
-                      IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.copy_outlined),
-                          onPressed: () {
-                            copyToClipboard(
-                                model.serverPasswd.value.text.trim());
-                          })
-                    ])
-            ]).marginOnly(left: 40, bottom: 15),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    model.serverId.value.text,
+                    style: textStyleValue,
+                  ),
+                ),
+                // ID的复制按钮已移除
+              ],
+            ).marginOnly(left: 39, bottom: 15),
+            
+            // 连接状态（保留）
             ConnectionStateNotification()
           ],
         ));
