@@ -278,7 +278,7 @@ void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);
   _runApp(
     '',
-    const ServerPage(),
+    ServerPage(),
     MyTheme.currentThemeMode(),
   );
   final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
