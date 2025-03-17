@@ -36,6 +36,9 @@ import kotlin.concurrent.thread
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import com.carriez.flutter_hbb.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+import com.carriez.flutter_hbb.KEY_SHARED_PREFERENCES
+import com.carriez.flutter_hbb.KEY_APP_DIR_CONFIG_PATH
 
 class MainActivity : FlutterActivity() {
     companion object {
