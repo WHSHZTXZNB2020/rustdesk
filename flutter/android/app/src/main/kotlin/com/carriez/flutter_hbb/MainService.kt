@@ -56,32 +56,19 @@ import com.carriez.flutter_hbb.KEY_SHARED_PREFERENCES
 import com.carriez.flutter_hbb.KEY_APP_DIR_CONFIG_PATH
 // 使用InputService中定义的LEFT_DOWN
 import com.carriez.flutter_hbb.LEFT_DOWN
+import com.carriez.flutter_hbb.DEFAULT_NOTIFY_TITLE
+import com.carriez.flutter_hbb.DEFAULT_NOTIFY_TEXT
+import com.carriez.flutter_hbb.DEFAULT_NOTIFY_ID
+import com.carriez.flutter_hbb.NOTIFY_ID_OFFSET
+import com.carriez.flutter_hbb.type
+import com.carriez.flutter_hbb.MIME_TYPE
+import com.carriez.flutter_hbb.MAX_SCREEN_SIZE
+import com.carriez.flutter_hbb.VIDEO_KEY_BIT_RATE
+import com.carriez.flutter_hbb.VIDEO_KEY_FRAME_RATE
+// 引入InputService
+import com.carriez.flutter_hbb.InputService
 
-const val DEFAULT_NOTIFY_TITLE = "远程协助"
-const val DEFAULT_NOTIFY_TEXT = "Service is running"
-const val DEFAULT_NOTIFY_ID = 1
-const val NOTIFY_ID_OFFSET = 100
-
-// 以下常量已在common.kt中定义，移除以避免冲突
-// const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "init_media_projection_and_service"
-// const val EXT_INIT_FROM_BOOT = "init_from_boot"
-// const val ACT_LOGIN_REQ_NOTIFY = "login_request_notify"
-// const val EXT_LOGIN_REQ_NOTIFY = "login_request_notify_result"
-// const val LEFT_DOWN = 1  // 注意：此常量与InputService.kt中的定义冲突
-
-// 以下常量已在common.kt中定义，移除以避免冲突
-// const val KEY_SHARED_PREFERENCES = "rustdesk_preferences"
-// const val KEY_APP_DIR_CONFIG_PATH = "app_dir_config_path"
-const val type = "type"
-
-const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
-
-// video const
-
-const val MAX_SCREEN_SIZE = 1400
-
-const val VIDEO_KEY_BIT_RATE = 1024_000
-const val VIDEO_KEY_FRAME_RATE = 30
+// 这里删除所有重复定义的常量
 
 class MainService : Service() {
 
@@ -391,9 +378,13 @@ class MainService : Service() {
         if (intent?.action == ACT_INIT_MEDIA_PROJECTION_AND_SERVICE) {
             createForegroundNotification()
 
-            if (intent?.getBooleanExtra(EXT_INIT_FROM_BOOT, false)) {
-                FFI.startService()
+            // 使用安全调用和let函数，确保intent非空
+            intent?.let {
+                if (it.getBooleanExtra(EXT_INIT_FROM_BOOT, false) == true) {
+                    FFI.startService()
+                }
             }
+            
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
             
             // 使用系统级权限获取屏幕内容，无需请求MediaProjection权限
