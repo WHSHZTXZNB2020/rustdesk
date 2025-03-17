@@ -6,6 +6,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import com.carriez.flutter_hbb.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
 
 class PermissionRequestTransparentActivity: Activity() {
     private val logTag = "permissionRequest"
