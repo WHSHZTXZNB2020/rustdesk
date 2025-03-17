@@ -296,15 +296,18 @@ class MainService : Service() {
         var w: Int
         var h: Int
         var dpi: Int
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
+        
         @Suppress("DEPRECATION")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11及以上，使用新API
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val m = windowManager.maximumWindowMetrics
             w = m.bounds.width()
             h = m.bounds.height()
             dpi = resources.configuration.densityDpi
         } else {
+            // Android 10及以下，使用旧API
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val dm = DisplayMetrics()
             windowManager.defaultDisplay.getRealMetrics(dm)
             w = dm.widthPixels
@@ -981,15 +984,9 @@ class MainService : Service() {
             // 在Android 11+上，尝试使用不同的flag组合
             val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
             
-            // 获取默认显示
-            val defaultDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display
-            } else {
-                windowManager.defaultDisplay
-            }
-            
-            if (defaultDisplay == null) {
-                Log.e(logTag, "Android 11: 无法获取默认显示")
+            // 不再使用defaultDisplay，直接使用已获取的displayManager和屏幕尺寸
+            if (displayManager == null) {
+                Log.e(logTag, "Android 11: displayManager为空")
                 return
             }
             
@@ -1012,7 +1009,7 @@ class MainService : Service() {
             }
             
             // 创建VirtualDisplay
-            virtualDisplay = displayManager?.createVirtualDisplay(
+            virtualDisplay = displayManager.createVirtualDisplay(
                 "RustDesk-A11-FrameBuffer",
                 SCREEN_INFO.width,
                 SCREEN_INFO.height,
