@@ -426,34 +426,63 @@ class MainService : Service() {
 
     @SuppressLint("WrongConstant")
     private fun createSurface(): Surface? {
-        return if (useVP9) {
-            // TODO
-            null
-        } else {
-            Log.d(logTag, "ImageReader.newInstance:INFO:$SCREEN_INFO")
-            imageReader =
-                ImageReader.newInstance(
-                    SCREEN_INFO.width,
-                    SCREEN_INFO.height,
-                    PixelFormat.RGBA_8888,
-                    4
-                ).apply {
-                    setOnImageAvailableListener({ imageReader: ImageReader ->
-                        try {
-                            // If not call acquireLatestImage, listener will not be called again
-                            imageReader.acquireLatestImage().use { image ->
-                                if (image == null || !isStart) return@setOnImageAvailableListener
+        try {
+            Log.d(logTag, "开始创建Surface (ImageReader)")
+            val imageReader = ImageReader.newInstance(
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                PixelFormat.RGBA_8888,
+                2
+            )
+            
+            Log.d(logTag, "ImageReader创建成功，设置回调函数")
+            
+            var frameCount = 0
+            imageReader.setOnImageAvailableListener(
+                {
+                    try {
+                        it?.acquireLatestImage().use { image ->
+                            if (image != null) {
+                                frameCount++
+                                if (frameCount % 100 == 0) {
+                                    Log.d(logTag, "已捕获 $frameCount 帧图像")
+                                }
+                                
                                 val planes = image.planes
-                                val buffer = planes[0].buffer
-                                buffer.rewind()
-                                FFI.onVideoFrameUpdate(buffer)
+                                val width = image.width
+                                val height = image.height
+                                
+                                if (planes != null && planes.isNotEmpty()) {
+                                    try {
+                                        val buffer = planes[0].buffer
+                                        val pixelStride = planes[0].pixelStride
+                                        val rowStride = planes[0].rowStride
+                                        val rowPadding = rowStride - pixelStride * width
+                                        
+                                        // 在日志中记录图像信息
+                                        if (frameCount == 1 || frameCount % 300 == 0) {
+                                            Log.d(logTag, "图像信息: 宽=$width, 高=$height, pixelStride=$pixelStride, rowStride=$rowStride, rowPadding=$rowPadding")
+                                        }
+                                        
+                                        if (width > 0 && height > 0) {
+                                            FFI.pushFrame(width, height, buffer, rowStride, (width * 4) * height)
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(logTag, "处理图像数据时出错: ${e.message}")
+                                    }
+                                }
                             }
-                        } catch (ignored: java.lang.Exception) {
                         }
-                    }, serviceHandler)
-                }
+                    } catch (ignored: java.lang.Exception) {
+                        Log.e(logTag, "处理图像时出现异常: ${ignored.message}")
+                    }
+                }, serviceHandler)
+            
             Log.d(logTag, "ImageReader.setOnImageAvailableListener done")
-            imageReader?.surface
+            return imageReader.surface
+        } catch (e: Exception) {
+            Log.e(logTag, "创建Surface失败: ${e.message}", e)
+            return null
         }
     }
 
@@ -482,6 +511,13 @@ class MainService : Service() {
         val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
                                  readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
+        // 新增：记录所有权限状态
+        Log.d(logTag, "权限检查结果:")
+        Log.d(logTag, "- ACCESS_SURFACE_FLINGER: $hasSurfaceFlingerPermission")
+        Log.d(logTag, "- CAPTURE_VIDEO_OUTPUT: ${captureVideoPermission == PackageManager.PERMISSION_GRANTED}")
+        Log.d(logTag, "- READ_FRAME_BUFFER: ${readFrameBufferPermission == PackageManager.PERMISSION_GRANTED}")
+        Log.d(logTag, "- Android 版本: ${Build.VERSION.SDK_INT}")
+        
         // 如果没有任何必要的权限，返回失败
         if (!hasSurfaceFlingerPermission && !hasOtherPermissions) {
             Log.e(logTag, "缺少必要的系统权限，无法启动屏幕捕获")
@@ -496,22 +532,36 @@ class MainService : Service() {
             Log.e(logTag, "创建Surface失败")
             return false
         }
+        
+        Log.d(logTag, "创建Surface成功，尺寸: ${SCREEN_INFO.width}x${SCREEN_INFO.height}, DPI: ${SCREEN_INFO.dpi}")
 
-        // 根据权限选择不同的屏幕捕获方式
-        if (hasSurfaceFlingerPermission) {
-            Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
-            
-            if (useVP9) {
-                startVP9VideoRecorderWithSurfaceFlinger()
-            } else {
-                startRawVideoRecorderWithSurfaceFlinger()
+        // 根据Android版本和权限选择不同的屏幕捕获方式
+        if (Build.VERSION.SDK_INT >= 30) { // Android 11+
+            Log.d(logTag, "Android 11+ 设备，采用特殊方法")
+            if (hasSurfaceFlingerPermission) {
+                Log.d(logTag, "Android 11+ 使用 ACCESS_SURFACE_FLINGER 权限捕获")
+                startRawVideoRecorderForAndroid11WithSurfaceFlinger()
+            } else if (hasOtherPermissions) {
+                Log.d(logTag, "Android 11+ 使用 CAPTURE_VIDEO_OUTPUT 权限捕获")
+                startRawVideoRecorderForAndroid11WithOtherPermissions()
             }
         } else {
-            Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
-            if (useVP9) {
-                startVP9VideoRecorderWithSystemPermissions()
+            // 原有逻辑保持不变
+            if (hasSurfaceFlingerPermission) {
+                Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
+                
+                if (useVP9) {
+                    startVP9VideoRecorderWithSurfaceFlinger()
+                } else {
+                    startRawVideoRecorderWithSurfaceFlinger()
+                }
             } else {
-                startRawVideoRecorderWithSystemPermissions()
+                Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
+                if (useVP9) {
+                    startVP9VideoRecorderWithSystemPermissions()
+                } else {
+                    startRawVideoRecorderWithSystemPermissions()
+                }
             }
         }
 
@@ -880,6 +930,106 @@ class MainService : Service() {
         } catch (e: Exception) {
             Log.e(logTag, "Error creating virtual display: ${e.message}")
             return null
+        }
+    }
+
+    // 新增: 为Android 11适配的SurfaceFlinger捕获方法
+    private fun startRawVideoRecorderForAndroid11WithSurfaceFlinger() {
+        try {
+            if (surface == null) {
+                Log.e(logTag, "Android 11 SurfaceFlinger: surface is null")
+                return
+            }
+            
+            Log.d(logTag, "Android 11 创建基于SurfaceFlinger的虚拟显示")
+            
+            // 使用FLAG_SECURE来确保可以捕获所有内容，包括受保护的窗口
+            val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            
+            // 创建虚拟显示
+            virtualDisplay = displayManager?.createVirtualDisplay(
+                "RustDesk-A11-SurfaceFlinger",
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                SCREEN_INFO.dpi,
+                surface,
+                flags,
+                null,  // 无回调
+                serviceHandler
+            )
+            
+            if (virtualDisplay != null) {
+                Log.d(logTag, "Android 11 SurfaceFlinger 虚拟显示创建成功")
+            } else {
+                Log.e(logTag, "Android 11 SurfaceFlinger 虚拟显示创建失败")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Android 11 SurfaceFlinger 错误: ${e.message}", e)
+        }
+    }
+    
+    // 新增: 为Android 11适配的CAPTURE_VIDEO_OUTPUT捕获方法
+    private fun startRawVideoRecorderForAndroid11WithOtherPermissions() {
+        try {
+            if (surface == null) {
+                Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT: surface is null")
+                return
+            }
+            
+            Log.d(logTag, "Android 11 创建基于CAPTURE_VIDEO_OUTPUT的虚拟显示")
+            
+            // 在Android 11+上，尝试使用不同的flag组合
+            val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            
+            // 获取默认显示
+            val defaultDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                windowManager.defaultDisplay
+            }
+            
+            if (defaultDisplay == null) {
+                Log.e(logTag, "Android 11: 无法获取默认显示")
+                return
+            }
+            
+            // 创建与ScreenCaptureService类似的回调处理
+            val callback = object : VirtualDisplay.Callback() {
+                override fun onPaused() {
+                    Log.d(logTag, "Android 11 VirtualDisplay 已暂停")
+                    super.onPaused()
+                }
+                
+                override fun onResumed() {
+                    Log.d(logTag, "Android 11 VirtualDisplay 已恢复")
+                    super.onResumed()
+                }
+                
+                override fun onStopped() {
+                    Log.d(logTag, "Android 11 VirtualDisplay 已停止")
+                    super.onStopped()
+                }
+            }
+            
+            // 创建VirtualDisplay
+            virtualDisplay = displayManager?.createVirtualDisplay(
+                "RustDesk-A11-FrameBuffer",
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                SCREEN_INFO.dpi,
+                surface,
+                flags,
+                callback,
+                serviceHandler
+            )
+            
+            if (virtualDisplay != null) {
+                Log.d(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建成功")
+            } else {
+                Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建失败")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 错误: ${e.message}", e)
         }
     }
 }
