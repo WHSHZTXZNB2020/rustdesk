@@ -39,6 +39,7 @@ import android.os.Looper
 import com.carriez.flutter_hbb.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
 import com.carriez.flutter_hbb.KEY_SHARED_PREFERENCES
 import com.carriez.flutter_hbb.KEY_APP_DIR_CONFIG_PATH
+import com.carriez.flutter_hbb.InputService
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -391,8 +392,14 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "stop_input" -> {
-                    InputService.ctx?.disableSelf()
-                    InputService.ctx = null
+                    // 替换disableSelf为更通用的停止服务方法
+                    val inputServiceCtx = InputService.ctx
+                    if (inputServiceCtx != null) {
+                        // 停止InputService
+                        stopService(Intent(this, InputService::class.java))
+                        // 重置ctx值
+                        InputService.ctx = null
+                    }
                     Companion.flutterMethodChannel?.invokeMethod(
                         "on_state_changed",
                         mapOf("name" to "input", "value" to InputService.isOpen.toString())
