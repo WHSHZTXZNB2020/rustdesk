@@ -75,7 +75,25 @@ private val TRANSLATE_MODE = KeyboardMode.Translate.number
 private val MAP_MODE = KeyboardMode.Map.number
 
 // InputService类用于处理输入事件
-class InputService : Service() {
+class InputService : Service {
+    // 默认构造函数
+    constructor() : super() {
+        Log.d(logTag, "InputService created with default constructor")
+    }
+    
+    // 带Context参数的构造函数
+    constructor(context: Context) : super() {
+        Log.d(logTag, "InputService created with context constructor")
+        initializeWithContext(context)
+        
+        // 通过Intent启动服务，确保服务在后台运行
+        val intent = Intent(context, InputService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
 
     companion object {
         var ctx: InputService? = null
@@ -119,6 +137,31 @@ class InputService : Service() {
         // 如果还未初始化，则使用applicationContext初始化
         if (!::appContext.isInitialized) {
             initializeWithContext(applicationContext)
+        }
+        
+        // 确保服务在前台运行，避免被系统杀死
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = "rustdesk_input_service"
+            val channelName = "RustDesk Input Service"
+            val channel = android.app.NotificationChannel(
+                channelId,
+                channelName,
+                android.app.NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                setShowBadge(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+            
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            notificationManager.createNotificationChannel(channel)
+            
+            val notification = android.app.Notification.Builder(this, channelId)
+                .setContentTitle("RustDesk")
+                .setContentText("Input Service Running")
+                .setSmallIcon(android.R.drawable.ic_menu_info_details)
+                .build()
+            
+            startForeground(1337, notification)
         }
     }
 
