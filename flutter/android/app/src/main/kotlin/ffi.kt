@@ -26,6 +26,9 @@ object FFI {
     external fun onClipboardUpdate(clips: ByteBuffer)
     external fun isServiceClipboardEnabled(): Boolean
     
+    // 添加pushFrame函数用于Android 11+兼容
+    external fun pushFrame(width: Int, height: Int, buffer: ByteBuffer, stride: Int, bufferSize: Int)
+    
     // 添加可能存在的函数变体
     external fun autorize(auth: String)
     external fun authorize(auth: String) // 备选拼写
