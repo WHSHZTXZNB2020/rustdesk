@@ -52,6 +52,18 @@ const val DEFAULT_NOTIFY_TEXT = "Service is running"
 const val DEFAULT_NOTIFY_ID = 1
 const val NOTIFY_ID_OFFSET = 100
 
+// 添加缺失的常量
+const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "init_media_projection_and_service"
+const val EXT_INIT_FROM_BOOT = "init_from_boot"
+const val ACT_LOGIN_REQ_NOTIFY = "login_request_notify"
+const val EXT_LOGIN_REQ_NOTIFY = "login_request_notify_result"
+const val LEFT_DOWN = 1
+
+// 共享设置键值
+const val KEY_SHARED_PREFERENCES = "rustdesk_preferences"
+const val KEY_APP_DIR_CONFIG_PATH = "app_dir_config_path"
+const val type = "type"
+
 const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
 
 // video const
@@ -375,7 +387,7 @@ class MainService : Service() {
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
             
             // 使用系统级权限获取屏幕内容，无需请求MediaProjection权限
-            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
             _isReady = true
             
@@ -468,7 +480,15 @@ class MainService : Service() {
                                         }
                                         
                                         if (width > 0 && height > 0) {
-                                            FFI.pushFrame(width, height, buffer, rowStride, (width * 4) * height)
+                                            // 兼容处理：尝试先使用pushFrame，如果不存在则回退到onVideoFrameUpdate
+                                            try {
+                                                FFI.pushFrame(width, height, buffer, rowStride, (width * 4) * height)
+                                            } catch (e: NoSuchMethodError) {
+                                                // 兼容旧版本API
+                                                buffer.rewind()
+                                                FFI.onVideoFrameUpdate(buffer)
+                                                Log.d(logTag, "回退到使用onVideoFrameUpdate API")
+                                            }
                                         }
                                     } catch (e: Exception) {
                                         Log.e(logTag, "处理图像数据时出错: ${e.message}")
@@ -539,8 +559,8 @@ class MainService : Service() {
         Log.d(logTag, "创建Surface成功，尺寸: ${SCREEN_INFO.width}x${SCREEN_INFO.height}, DPI: ${SCREEN_INFO.dpi}")
 
         // 根据Android版本和权限选择不同的屏幕捕获方式
-        if (Build.VERSION.SDK_INT >= 30) { // Android 11+
-            Log.d(logTag, "Android 11+ 设备，采用特殊方法")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) { // Android 11+
+            Log.d(logTag, "Android 11+ (API 30+) 设备，采用特殊方法")
             if (hasSurfaceFlingerPermission) {
                 Log.d(logTag, "Android 11+ 使用 ACCESS_SURFACE_FLINGER 权限捕获")
                 startRawVideoRecorderForAndroid11WithSurfaceFlinger()
@@ -1008,25 +1028,39 @@ class MainService : Service() {
                 }
             }
             
-            // 创建VirtualDisplay
-            virtualDisplay = displayManager.createVirtualDisplay(
-                "RustDesk-A11-FrameBuffer",
-                SCREEN_INFO.width,
-                SCREEN_INFO.height,
-                SCREEN_INFO.dpi,
-                surface,
-                flags,
-                callback,
-                serviceHandler
-            )
-            
-            if (virtualDisplay != null) {
-                Log.d(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建成功")
+            // 创建VirtualDisplay - 修复空值处理问题
+            val dm = displayManager // 创建本地变量
+            if (dm != null) {
+                virtualDisplay = dm.createVirtualDisplay(
+                    "RustDesk-A11-FrameBuffer",
+                    SCREEN_INFO.width,
+                    SCREEN_INFO.height,
+                    SCREEN_INFO.dpi,
+                    surface!!,
+                    flags,
+                    callback,
+                    serviceHandler
+                )
+                
+                if (virtualDisplay != null) {
+                    Log.d(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建成功")
+                } else {
+                    Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建失败")
+                }
             } else {
-                Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 虚拟显示创建失败")
+                Log.e(logTag, "Android 11: displayManager 在创建虚拟显示前变为null")
             }
         } catch (e: Exception) {
             Log.e(logTag, "Android 11 CAPTURE_VIDEO_OUTPUT 错误: ${e.message}", e)
+        }
+    }
+
+    // 添加帮助函数
+    private fun translate(text: String): String {
+        return try {
+            FFI.translateLocale("", text)
+        } catch (e: Exception) {
+            text
         }
     }
 }
