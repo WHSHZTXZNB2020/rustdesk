@@ -392,13 +392,15 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "stop_input" -> {
-                    // 替换disableSelf为更通用的停止服务方法
+                    // 停止InputService
                     val inputServiceCtx = InputService.ctx
                     if (inputServiceCtx != null) {
-                        // 停止InputService
-                        stopService(Intent(this, InputService::class.java))
-                        // 重置ctx值
+                        // 先通知InputService停止自身
+                        inputServiceCtx.disableSelf()
+                        // 确保ctx被清空
                         InputService.ctx = null
+                        // 同时也通过stopService确保服务被停止
+                        stopService(Intent(this, InputService::class.java))
                     }
                     Companion.flutterMethodChannel?.invokeMethod(
                         "on_state_changed",
