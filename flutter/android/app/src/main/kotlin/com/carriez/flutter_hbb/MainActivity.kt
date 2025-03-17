@@ -646,7 +646,8 @@ class MainActivity : FlutterActivity() {
         Log.d(logTag, "确保本地UI交互能力")
         try {
             // 1. 暂时暂停输入服务的事件处理
-            InputService.ctx?.let { service ->
+            val inputService = InputService.ctx
+            if (inputService != null) {
                 // 记录当前应用窗口位置和前台状态
                 window.decorView.post {
                     val appPackageName = packageName
