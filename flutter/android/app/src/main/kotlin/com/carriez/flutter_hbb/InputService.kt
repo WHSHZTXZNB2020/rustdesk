@@ -112,17 +112,6 @@ class InputService : Service() {
     // 事件处理状态
     private var lastDownTime = 0L   // 上次DOWN事件的时间戳
     
-    // 提供公开的无参构造函数
-    constructor() : super() {
-        Log.d(logTag, "InputService created with default constructor")
-    }
-    
-    // 提供带Context参数的公开构造函数
-    constructor(context: Context) : super() {
-        Log.d(logTag, "InputService created with context constructor")
-        initializeWithContext(context)
-    }
-    
     override fun onCreate() {
         super.onCreate()
         Log.d(logTag, "InputService onCreate called")
