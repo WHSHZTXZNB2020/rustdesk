@@ -37,7 +37,7 @@ import java.lang.reflect.Method
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
 
-const val LEFT_DOWN = 9
+const val LEFT_DOWN = 1
 const val LEFT_MOVE = 8
 const val LEFT_UP = 10
 const val RIGHT_UP = 18
