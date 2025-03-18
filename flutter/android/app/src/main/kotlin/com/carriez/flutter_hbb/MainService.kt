@@ -258,7 +258,7 @@ class MainService : Service() {
             get() = _isAudioStart
     }
 
-    private val logTag = "MainService"
+    private var logTag = "MainService"
     private val useVP9 = false
     private val binder = LocalBinder()
     private lateinit var notificationChannel: String
@@ -300,7 +300,7 @@ class MainService : Service() {
     override fun onCreate() {
         super.onCreate()
         logTag = "MainService"
-        isStart = true
+        _isStart = true
         Log.d(logTag, "onCreate")
         
         // 初始化音频记录器 - 使用正确的方法引用
