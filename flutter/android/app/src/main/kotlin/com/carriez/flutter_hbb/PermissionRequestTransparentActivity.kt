@@ -32,6 +32,11 @@ class PermissionRequestTransparentActivity: Activity() {
                 launchService(data)
             } else {
                 setResult(RES_FAILED)
+                // 通知失败
+                MainActivity.flutterMethodChannel?.invokeMethod(
+                    "on_state_changed",
+                    mapOf("name" to "media", "value" to "false")
+                )
             }
         }
 
@@ -39,16 +44,23 @@ class PermissionRequestTransparentActivity: Activity() {
     }
 
     private fun launchService(mediaProjectionResultIntent: Intent) {
-        Log.d(logTag, "Launch MainService")
+        Log.d(logTag, "Launch MainService with MediaProjection")
         val serviceIntent = Intent(this, MainService::class.java)
         serviceIntent.action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
         serviceIntent.putExtra(EXT_MEDIA_PROJECTION_RES_INTENT, mediaProjectionResultIntent)
+        // 设置为MediaProjection捕获方法
+        serviceIntent.putExtra("capture_method", 3) // CAPTURE_METHOD_MEDIA_PROJECTION
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         } else {
             startService(serviceIntent)
         }
+        
+        // 通知成功
+        MainActivity.flutterMethodChannel?.invokeMethod(
+            "on_state_changed",
+            mapOf("name" to "media", "value" to "true")
+        )
     }
-
 }
