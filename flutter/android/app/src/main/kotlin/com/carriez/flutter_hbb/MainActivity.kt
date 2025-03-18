@@ -36,6 +36,7 @@ import kotlin.concurrent.thread
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.content.IntentFilter
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -57,6 +58,9 @@ class MainActivity : FlutterActivity() {
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
+
+    // 类级别变量，防止广播接收器被垃圾回收
+    private var mediaProjectionRequestReceiver: android.content.BroadcastReceiver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -143,18 +147,28 @@ class MainActivity : FlutterActivity() {
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
         
-        // 添加广播接收器，用于接收请求MediaProjection的广播
-        val mediaProjectionRequestReceiver = object : android.content.BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == ACT_REQUEST_MEDIA_PROJECTION) {
-                    requestMediaProjection()
+        // 先执行原有逻辑
+        checkAccessibility()
+        handler = Handler(Looper.getMainLooper())
+        
+        // 然后添加广播接收器
+        try {
+            mediaProjectionRequestReceiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (intent?.action == ACT_REQUEST_MEDIA_PROJECTION) {
+                        Log.d("MainActivity", "收到MediaProjection请求广播")
+                        requestMediaProjection()
+                    }
                 }
             }
+            
+            // 注册广播接收器
+            val intentFilter = IntentFilter(ACT_REQUEST_MEDIA_PROJECTION)
+            registerReceiver(mediaProjectionRequestReceiver, intentFilter)
+            Log.d("MainActivity", "MediaProjection请求广播接收器已注册")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "注册广播接收器失败: ${e.message}")
         }
-        
-        // 注册广播接收器
-        val intentFilter = android.content.IntentFilter(ACT_REQUEST_MEDIA_PROJECTION)
-        registerReceiver(mediaProjectionRequestReceiver, intentFilter)
         
         // 应用启动时检查系统级权限状态并通知Flutter端
         if (checkSystemPermissions()) {
@@ -195,6 +209,16 @@ class MainActivity : FlutterActivity() {
             unbindService(serviceConnection)
         }
         super.onDestroy()
+        
+        // 注销广播接收器
+        try {
+            if (mediaProjectionRequestReceiver != null) {
+                unregisterReceiver(mediaProjectionRequestReceiver)
+                mediaProjectionRequestReceiver = null
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "注销广播接收器失败: ${e.message}")
+        }
     }
 
     private val serviceConnection = object : ServiceConnection {
