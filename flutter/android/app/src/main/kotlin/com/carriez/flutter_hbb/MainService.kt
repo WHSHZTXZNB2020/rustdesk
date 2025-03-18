@@ -371,13 +371,34 @@ class MainService : Service() {
             }
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
             
-            // 使用系统级权限获取屏幕内容，无需请求MediaProjection权限
-            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-            display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
-            _isReady = true
-            
-            // 检查必要的权限
-            checkSystemPermissions()
+            // 检查是否有MediaProjection的结果意图
+            val mediaProjectionIntent = intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)
+            if (mediaProjectionIntent != null) {
+                Log.d(logTag, "收到MediaProjection结果，使用MediaProjection进行屏幕捕获")
+                
+                // 获取MediaProjection
+                val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                try {
+                    val mediaProjection = mediaProjectionManager.getMediaProjection(RESULT_OK, mediaProjectionIntent)
+                    if (mediaProjection != null) {
+                        // 初始化屏幕捕获（使用MediaProjection）
+                        setupMediaProjection(mediaProjection)
+                    } else {
+                        Log.e(logTag, "获取MediaProjection失败")
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "MediaProjection初始化错误: ${e.message}")
+                }
+            } else {
+                // 使用系统级权限获取屏幕内容，无需请求MediaProjection权限
+                Log.d(logTag, "使用系统级权限进行屏幕捕获")
+                displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+                display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
+                _isReady = true
+                
+                // 检查必要的权限
+                checkSystemPermissions()
+            }
         }
         return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
     }
@@ -388,72 +409,76 @@ class MainService : Service() {
     }
 
     private fun checkSystemPermissions() {
-        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
-        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
-        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+        val hasSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER) == PackageManager.PERMISSION_GRANTED
+        val hasCaptureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT) == PackageManager.PERMISSION_GRANTED
+        val hasReadFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER) == PackageManager.PERMISSION_GRANTED
         
-        // 优先检查 ACCESS_SURFACE_FLINGER 权限
-        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        Log.d(logTag, "系统权限检查: " +
+              "ACCESS_SURFACE_FLINGER=$hasSurfaceFlingerPermission, " +
+              "CAPTURE_VIDEO_OUTPUT=$hasCaptureVideoPermission, " +
+              "READ_FRAME_BUFFER=$hasReadFrameBufferPermission")
         
-        // 然后检查其他权限
-        val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
-                                 readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
-        
-        if (hasSurfaceFlingerPermission || hasOtherPermissions) {
-            Log.d(logTag, "系统级权限已授予，可以直接捕获屏幕")
-            if (hasSurfaceFlingerPermission) {
-                Log.d(logTag, "将使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
-            } else {
-                Log.d(logTag, "将使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
-            }
-            // 权限都已授予，标记为Ready
-            _isReady = true
-            // 通知UI更新状态
-            MainActivity.flutterMethodChannel?.invokeMethod(
-                "on_state_changed",
-                mapOf("name" to "media", "value" to "true")
-            )
+        if (hasSurfaceFlingerPermission || (hasCaptureVideoPermission && hasReadFrameBufferPermission)) {
+            Log.d(logTag, "系统权限检查通过，可以使用系统级屏幕捕获")
         } else {
-            Log.e(logTag, "缺少必要的系统权限，无法进行屏幕捕获")
-            _isReady = false
-            // 通知UI更新状态
-            MainActivity.flutterMethodChannel?.invokeMethod(
-                "on_state_changed",
-                mapOf("name" to "media", "value" to "false")
-            )
+            Log.w(logTag, "系统权限不足，如果需要屏幕捕获，将使用MediaProjection机制")
         }
     }
 
     @SuppressLint("WrongConstant")
     private fun createSurface(): Surface? {
-        return if (useVP9) {
-            // TODO
-            null
-        } else {
-            Log.d(logTag, "ImageReader.newInstance:INFO:$SCREEN_INFO")
-            imageReader =
-                ImageReader.newInstance(
-                    SCREEN_INFO.width,
-                    SCREEN_INFO.height,
-                    PixelFormat.RGBA_8888,
-                    4
-                ).apply {
-                    setOnImageAvailableListener({ imageReader: ImageReader ->
-                        try {
-                            // If not call acquireLatestImage, listener will not be called again
-                            imageReader.acquireLatestImage().use { image ->
-                                if (image == null || !isStart) return@setOnImageAvailableListener
-                                val planes = image.planes
-                                val buffer = planes[0].buffer
-                                buffer.rewind()
-                                FFI.onVideoFrameUpdate(buffer)
-                            }
-                        } catch (ignored: java.lang.Exception) {
-                        }
-                    }, serviceHandler)
+        try {
+            if (useVP9) {
+                // VP9暂不实现，回退到普通模式
+                Log.d(logTag, "VP9模式未完全实现，回退到普通图像读取器")
+            }
+            
+            // 尝试处理不同Android版本
+            Log.d(logTag, "创建ImageReader，屏幕信息: $SCREEN_INFO")
+            
+            // 针对Android 11的特殊处理
+            val pixelFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11可能需要不同的像素格式
+                try {
+                    PixelFormat.RGBA_8888
+                } catch (e: Exception) {
+                    Log.w(logTag, "Android 11 RGBA_8888格式错误，尝试RGBX_8888: ${e.message}")
+                    PixelFormat.RGBX_8888
                 }
-            Log.d(logTag, "ImageReader.setOnImageAvailableListener done")
-            imageReader?.surface
+            } else {
+                PixelFormat.RGBA_8888
+            }
+            
+            // 创建ImageReader
+            imageReader = ImageReader.newInstance(
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                pixelFormat,
+                4  // 最大图像数量
+            ).apply {
+                setOnImageAvailableListener({ imageReader: ImageReader ->
+                    try {
+                        // 获取最新图像并处理
+                        imageReader.acquireLatestImage().use { image ->
+                            if (image == null || !isStart) return@setOnImageAvailableListener
+                            val planes = image.planes
+                            val buffer = planes[0].buffer
+                            buffer.rewind()
+                            FFI.onVideoFrameUpdate(buffer)
+                        }
+                    } catch (ignored: Exception) {
+                        // 忽略图像处理错误
+                        Log.w(logTag, "处理图像时出错: ${ignored.message}")
+                    }
+                }, serviceHandler)
+            }
+            
+            Log.d(logTag, "ImageReader创建成功并设置监听器")
+            return imageReader?.surface
+            
+        } catch (e: Exception) {
+            Log.e(logTag, "创建Surface时出错: ${e.message}")
+            return null
         }
     }
 
@@ -472,6 +497,8 @@ class MainService : Service() {
             return true
         }
         
+        Log.d(logTag, "开始启动屏幕捕获，Android版本: ${Build.VERSION.SDK_INT}")
+        
         // 优先检查 ACCESS_SURFACE_FLINGER 权限
         val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
         val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
@@ -482,6 +509,11 @@ class MainService : Service() {
         val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
                                  readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
+        // 记录权限状态到日志
+        Log.d(logTag, "权限状态 - ACCESS_SURFACE_FLINGER: $hasSurfaceFlingerPermission, " +
+                     "CAPTURE_VIDEO_OUTPUT: ${captureVideoPermission == PackageManager.PERMISSION_GRANTED}, " +
+                     "READ_FRAME_BUFFER: ${readFrameBufferPermission == PackageManager.PERMISSION_GRANTED}")
+        
         // 如果没有任何必要的权限，返回失败
         if (!hasSurfaceFlingerPermission && !hasOtherPermissions) {
             Log.e(logTag, "缺少必要的系统权限，无法启动屏幕捕获")
@@ -489,32 +521,99 @@ class MainService : Service() {
         }
         
         updateScreenInfo(resources.configuration.orientation)
-        Log.d(logTag, "Start Capture with system permissions")
+        Log.d(logTag, "屏幕信息更新: 宽=${SCREEN_INFO.width}, 高=${SCREEN_INFO.height}, DPI=${SCREEN_INFO.dpi}")
+        
         surface = createSurface()
-
         if (surface == null) {
             Log.e(logTag, "创建Surface失败")
             return false
         }
+        Log.d(logTag, "成功创建Surface")
 
-        // 根据权限选择不同的屏幕捕获方式
+        // Android 11兼容性处理 - 尝试多种屏幕捕获方法
+        var captureSuccess = false
+        
+        // 1. 首先尝试SurfaceFlinger方法 (优先级最高)
         if (hasSurfaceFlingerPermission) {
-            Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
-            
-            if (useVP9) {
-                startVP9VideoRecorderWithSurfaceFlinger()
-            } else {
-                startRawVideoRecorderWithSurfaceFlinger()
-            }
-        } else {
-            Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
-            if (useVP9) {
-                startVP9VideoRecorderWithSystemPermissions()
-            } else {
-                startRawVideoRecorderWithSystemPermissions()
+            Log.d(logTag, "尝试使用ACCESS_SURFACE_FLINGER权限进行屏幕捕获")
+            try {
+                if (useVP9) {
+                    startVP9VideoRecorderWithSurfaceFlinger()
+                } else {
+                    startRawVideoRecorderWithSurfaceFlinger()
+                }
+                // 检查virtualDisplay是否创建成功
+                if (virtualDisplay != null) {
+                    Log.d(logTag, "使用SurfaceFlinger成功创建屏幕捕获")
+                    captureSuccess = true
+                } else {
+                    Log.e(logTag, "使用SurfaceFlinger创建屏幕捕获失败")
+                }
+            } catch (e: Exception) {
+                Log.e(logTag, "使用SurfaceFlinger方法出错: ${e.message}")
             }
         }
+        
+        // 2. 如果SurfaceFlinger失败，尝试使用CAPTURE_VIDEO_OUTPUT和READ_FRAME_BUFFER权限
+        if (!captureSuccess && hasOtherPermissions) {
+            Log.d(logTag, "尝试使用CAPTURE_VIDEO_OUTPUT和READ_FRAME_BUFFER权限进行屏幕捕获")
+            try {
+                if (useVP9) {
+                    startVP9VideoRecorderWithSystemPermissions()
+                } else {
+                    startRawVideoRecorderWithSystemPermissions()
+                }
+                // 检查virtualDisplay是否创建成功
+                if (virtualDisplay != null) {
+                    Log.d(logTag, "使用系统权限成功创建屏幕捕获")
+                    captureSuccess = true
+                } else {
+                    Log.e(logTag, "使用系统权限创建屏幕捕获失败")
+                }
+            } catch (e: Exception) {
+                Log.e(logTag, "使用系统权限方法出错: ${e.message}")
+            }
+        }
+        
+        // 3. 对于Android 11，如果前两种方法都失败，尝试使用MediaProjection (最后的备选方案)
+        if (!captureSuccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Log.d(logTag, "系统权限方法在Android 11上失败，尝试请求MediaProjection权限")
+            
+            // 通知用户我们需要请求屏幕录制权限
+            Handler(Looper.getMainLooper()).post {
+                MainActivity.flutterMethodChannel?.invokeMethod(
+                    "show_message",
+                    mapOf("message" to "正在尝试请求屏幕录制权限...")
+                )
+                
+                // 发送一个广播到MainActivity请求MediaProjection
+                val intent = Intent(ACT_REQUEST_MEDIA_PROJECTION)
+                intent.setPackage(packageName)
+                sendBroadcast(intent)
+            }
+            
+            // 等待MediaProjection结果，设置一个超时
+            var timeoutCounter = 0
+            while (!_isReady && timeoutCounter < 50) { // 最多等待5秒
+                Thread.sleep(100)
+                timeoutCounter++
+            }
+            
+            if (_isReady) {
+                Log.d(logTag, "成功获取MediaProjection权限")
+                captureSuccess = true
+            } else {
+                Log.e(logTag, "未能获取MediaProjection权限或超时")
+            }
+        }
+        
+        // 如果所有方法都失败，则返回失败
+        if (!captureSuccess) {
+            Log.e(logTag, "所有屏幕捕获方法都失败")
+            return false
+        }
 
+        // 处理音频捕获 (音频捕获已正常工作，保持不变)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!audioRecordHandle.createAudioRecorder(false, null)) {
                 Log.d(logTag, "createAudioRecorder fail")
@@ -528,6 +627,7 @@ class MainService : Service() {
         _isStart = true
         FFI.setFrameRawEnable("video", true)
         MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
+        Log.d(logTag, "屏幕捕获成功启动")
         return true
     }
     
@@ -839,7 +939,7 @@ class MainService : Service() {
         // 什么都不做，因为我们使用系统级权限
     }
 
-    // 添加使用系统权限的视频录制方法
+    // 对于Android 11及以上版本，使用系统权限实现屏幕捕获
     private fun startRawVideoRecorderWithSystemPermissions() {
         try {
             if (surface == null) {
@@ -847,39 +947,203 @@ class MainService : Service() {
                 return
             }
             
-            // 使用系统权限从Display直接读取帧缓冲
-            if (display != null) {
-                Log.d(logTag, "Creating virtual display with system permissions")
-                virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            Log.d(logTag, "使用系统权限创建虚拟显示")
+            
+            // 创建不同配置的虚拟显示，以适应Android 11
+            virtualDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11及以上版本可能需要特殊标志
+                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED
+                displayManager?.createVirtualDisplay(
+                    "RustDesk-SystemPerm-Display-R",
+                    SCREEN_INFO.width,
+                    SCREEN_INFO.height,
+                    SCREEN_INFO.dpi,
+                    surface,
+                    flags,
+                    null,  // 回调
+                    null   // 处理程序
+                )
             } else {
-                Log.e(logTag, "Display is null, cannot create virtual display")
+                // 旧版本Android实现
+                displayManager?.createVirtualDisplay(
+                    "RustDesk-SystemPerm-Display",
+                    SCREEN_INFO.width,
+                    SCREEN_INFO.height,
+                    SCREEN_INFO.dpi,
+                    surface,
+                    VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    null,  // 回调
+                    null   // 处理程序
+                )
+            }
+            
+            // 检查是否成功创建
+            if (virtualDisplay != null) {
+                Log.d(logTag, "成功创建系统权限的虚拟显示")
+            } else {
+                Log.e(logTag, "创建系统权限的虚拟显示失败")
+                
+                // 尝试备选方法，减小尺寸再试一次
+                Log.d(logTag, "尝试使用较小尺寸重新创建虚拟显示")
+                val smallerWidth = SCREEN_INFO.width / 2
+                val smallerHeight = SCREEN_INFO.height / 2
+                
+                virtualDisplay = displayManager?.createVirtualDisplay(
+                    "RustDesk-SystemPerm-Display-Small",
+                    smallerWidth,
+                    smallerHeight,
+                    SCREEN_INFO.dpi,
+                    surface,
+                    VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                )
+                
+                if (virtualDisplay != null) {
+                    Log.d(logTag, "成功创建较小尺寸的虚拟显示")
+                }
             }
         } catch (e: Exception) {
             Log.e(logTag, "Error starting raw video recorder with system permissions: ${e.message}")
         }
     }
-    
+
+    // 对于VP9编码器使用系统权限实现屏幕捕获
     private fun startVP9VideoRecorderWithSystemPermissions() {
-        // 实现VP9编码器的系统权限版本
-        // 这部分代码与原VP9实现类似，但使用系统权限
-        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not implemented yet")
-    }
-    
-    // 创建使用系统权限的虚拟显示
-    private fun createVirtualDisplayWithSystemPermissions(surface: Surface): VirtualDisplay? {
         try {
-            // 使用系统权限从屏幕直接读取内容
-            return displayManager?.createVirtualDisplay(
-                "RustDesk-Display",
+            if (surface == null) {
+                Log.e(logTag, "startVP9VideoRecorderWithSystemPermissions: surface is null")
+                return
+            }
+            
+            // 创建媒体格式
+            val format = MediaFormat.createVideoFormat(MIME_TYPE, SCREEN_INFO.width, SCREEN_INFO.height)
+            format.setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_KEY_BIT_RATE)
+            format.setInteger(MediaFormat.KEY_FRAME_RATE, VIDEO_KEY_FRAME_RATE)
+            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT, COLOR_FormatSurface)
+            
+            // 创建编码器
+            videoEncoder = MediaCodec.createEncoderByType(MIME_TYPE)
+            videoEncoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            
+            // 获取输入Surface
+            val encoderSurface = videoEncoder?.createInputSurface()
+            
+            // 创建虚拟显示
+            virtualDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11及以上版本可能需要特殊标志
+                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED
+                displayManager?.createVirtualDisplay(
+                    "RustDesk-VP9-SystemPerm-Display-R",
+                    SCREEN_INFO.width,
+                    SCREEN_INFO.height,
+                    SCREEN_INFO.dpi,
+                    encoderSurface,
+                    flags
+                )
+            } else {
+                // 旧版本Android实现
+                displayManager?.createVirtualDisplay(
+                    "RustDesk-VP9-SystemPerm-Display",
+                    SCREEN_INFO.width,
+                    SCREEN_INFO.height,
+                    SCREEN_INFO.dpi,
+                    encoderSurface,
+                    VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                )
+            }
+            
+            if (virtualDisplay == null) {
+                Log.e(logTag, "创建VP9虚拟显示失败")
+                videoEncoder?.release()
+                videoEncoder = null
+                return
+            }
+            
+            // 启动编码器
+            videoEncoder?.start()
+            
+            // 启动VP9编码线程
+            sendVP9Thread.execute {
+                try {
+                    val bufferInfo = MediaCodec.BufferInfo()
+                    while (isStart) {
+                        val outIndex = videoEncoder?.dequeueOutputBuffer(bufferInfo, -1) ?: -1
+                        if (outIndex >= 0) {
+                            val buffer = videoEncoder?.getOutputBuffer(outIndex)
+                            if (buffer != null) {
+                                FFI.onVideoFrameUpdate(buffer)
+                            }
+                            videoEncoder?.releaseOutputBuffer(outIndex, false)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "VP9 encoding error: ${e.message}")
+                } finally {
+                    videoEncoder?.stop()
+                    videoEncoder?.release()
+                    videoEncoder = null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error starting VP9 video recorder with system permissions: ${e.message}")
+        }
+    }
+
+    // 添加新方法，用于处理MediaProjection
+    private fun setupMediaProjection(mediaProjection: android.media.projection.MediaProjection) {
+        Log.d(logTag, "使用MediaProjection设置屏幕捕获")
+        
+        // 初始化必要的组件
+        displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        display = displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
+        
+        // 更新屏幕信息
+        updateScreenInfo(resources.configuration.orientation)
+        
+        // 创建Surface
+        surface = createSurface()
+        if (surface == null) {
+            Log.e(logTag, "创建Surface失败")
+            return
+        }
+        
+        // 创建虚拟显示
+        try {
+            Log.d(logTag, "使用MediaProjection创建虚拟显示")
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                "RustDesk-MediaProjection-Display",
                 SCREEN_INFO.width,
                 SCREEN_INFO.height,
                 SCREEN_INFO.dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 surface,
-                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                null,
+                null
             )
+            
+            if (virtualDisplay != null) {
+                Log.d(logTag, "成功创建MediaProjection虚拟显示")
+                
+                // 如果设备是Android 11或更高版本，还需要设置音频捕获
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    if (!audioRecordHandle.createAudioRecorder(false, mediaProjection)) {
+                        Log.d(logTag, "MediaProjection音频录制创建失败")
+                    } else {
+                        Log.d(logTag, "MediaProjection音频录制开始")
+                        audioRecordHandle.startAudioRecorder()
+                    }
+                }
+                
+                // 设置状态和通知
+                _isReady = true
+                _isStart = true
+                FFI.setFrameRawEnable("video", true)
+                MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
+            } else {
+                Log.e(logTag, "创建MediaProjection虚拟显示失败")
+            }
         } catch (e: Exception) {
-            Log.e(logTag, "Error creating virtual display: ${e.message}")
-            return null
+            Log.e(logTag, "MediaProjection虚拟显示创建错误: ${e.message}")
         }
     }
 }
