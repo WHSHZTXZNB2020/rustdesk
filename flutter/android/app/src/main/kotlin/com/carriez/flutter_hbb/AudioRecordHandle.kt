@@ -105,7 +105,8 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                     } catch (e: Exception) {
                         // 如果REMOTE_SUBMIX不支持，回退到其他音频源
                         try {
-                            MediaRecorder.AudioSource.SYSTEM
+                            // 删除SYSTEM音频源的引用，使用MIC替代
+                            MediaRecorder.AudioSource.MIC
                         } catch (e2: Exception) {
                             MediaRecorder.AudioSource.DEFAULT
                         }
