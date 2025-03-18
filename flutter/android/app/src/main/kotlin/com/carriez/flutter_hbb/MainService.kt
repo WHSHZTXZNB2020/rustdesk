@@ -823,8 +823,7 @@ class MainService : Service() {
                 try {
                     // 尝试使用更多标志提高质量
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or 
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE or  // 允许捕获安全内容
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS  // 包括系统装饰
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE  // 允许捕获安全内容
                 } catch (e: Exception) {
                     // 如果不支持某些标志，回退到基本标志
                     Log.d(logTag, "高级标志不受支持，使用基本标志")
@@ -1289,7 +1288,7 @@ class MainService : Service() {
         updateScreenInfo(resources.configuration.orientation)
         
         // 创建Surface
-        surface = createSurface()
+        surface = createSurfaceOptimal()
         if (surface == null) {
             Log.e(logTag, "创建Surface失败")
             return
