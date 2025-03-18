@@ -37,13 +37,7 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 
-// 常量定义
-const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "init_media_projection_and_service"
-const val ACT_REQUEST_MEDIA_PROJECTION = "request_media_projection"
-const val EXT_MEDIA_PROJECTION_RES_INTENT = "ext_media_projection_res_intent"
-const val REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION = 6
-const val REQ_REQUEST_MEDIA_PROJECTION = 5
-const val RES_FAILED = 0
+// 引用common.kt中的常量定义
 
 class MainActivity : FlutterActivity() {
     companion object {
