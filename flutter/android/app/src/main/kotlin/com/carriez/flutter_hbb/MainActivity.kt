@@ -37,6 +37,8 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.content.IntentFilter
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -121,23 +123,66 @@ class MainActivity : FlutterActivity() {
         if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION) {
             if (resultCode == RESULT_OK && data != null) {
                 Log.d("MainActivity", "MediaProjection权限获取成功，启动服务")
-                // 启动服务
-                val serviceIntent = Intent(this, MainService::class.java)
-                serviceIntent.action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
-                serviceIntent.putExtra(EXT_MEDIA_PROJECTION_RES_INTENT, data)
-                
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent)
-                } else {
-                    startService(serviceIntent)
+                try {
+                    // 获取MediaProjectionManager
+                    val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    
+                    // 获取MediaProjection
+                    val mediaProjection = mediaProjectionManager.getMediaProjection(RESULT_OK, data)
+                    
+                    if (mediaProjection != null) {
+                        Log.d("MainActivity", "成功创建MediaProjection实例")
+                        
+                        // 检查服务是否已绑定
+                        if (mainService != null) {
+                            // 如果服务已存在，则直接设置MediaProjection
+                            mainService?.setMediaProjection(mediaProjection)
+                        } else {
+                            // 否则，启动服务并传递MediaProjection
+                            val serviceIntent = Intent(this, MainService::class.java)
+                            serviceIntent.action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                            serviceIntent.putExtra(EXT_MEDIA_PROJECTION_RES_INTENT, data)
+                            
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(serviceIntent)
+                            } else {
+                                startService(serviceIntent)
+                            }
+                            
+                            // 同时尝试绑定服务
+                            bindService(Intent(this, MainService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+                        }
+                    } else {
+                        Log.e("MainActivity", "MediaProjection创建失败")
+                        showErrorMessage("屏幕录制权限获取失败")
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "处理MediaProjection结果时出错: ${e.message}")
+                    showErrorMessage("处理屏幕录制权限时出错: ${e.message}")
                 }
             } else {
                 Log.e("MainActivity", "MediaProjection权限获取失败")
-                flutterMethodChannel?.invokeMethod(
-                    "show_message",
-                    mapOf("message" to "屏幕录制权限获取失败，远程控制可能无法正常工作")
-                )
+                showErrorMessage("屏幕录制权限获取失败")
             }
+        }
+    }
+
+    // 添加显示错误消息的辅助方法
+    private fun showErrorMessage(message: String) {
+        try {
+            flutterMethodChannel?.invokeMethod(
+                "show_message",
+                mapOf("message" to message)
+            )
+        } catch (e: Exception) {
+            Log.e("MainActivity", "显示错误消息失败: ${e.message}")
+            // 使用Toast作为备选方案
+            val toast = android.widget.Toast.makeText(
+                this,
+                message,
+                android.widget.Toast.LENGTH_LONG
+            )
+            toast.show()
         }
     }
 
