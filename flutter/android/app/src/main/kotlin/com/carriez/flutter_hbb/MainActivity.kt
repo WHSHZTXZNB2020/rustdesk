@@ -100,18 +100,40 @@ class MainActivity : FlutterActivity() {
         return hasSurfaceFlingerPermission || hasOtherPermissions
     }
     
-    // 移除不再需要的requestMediaProjection方法
-    // private fun requestMediaProjection() {
-    //     val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-    //         action = ACT_REQUEST_MEDIA_PROJECTION
-    //     }
-    //     startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
-    // }
+    // 重新添加requestMediaProjection方法作为备选方案
+    private fun requestMediaProjection() {
+        Log.d("MainActivity", "请求MediaProjection权限")
+        val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
+            action = ACT_REQUEST_MEDIA_PROJECTION
+        }
+        startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
+    }
 
-    // 修改onActivityResult，移除MediaProjection相关处理
+    // 修改onActivityResult以处理MediaProjection结果
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        // 系统级权限不需要ActivityResult处理
+        
+        if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION) {
+            if (resultCode == RESULT_OK && data != null) {
+                Log.d("MainActivity", "MediaProjection权限获取成功，启动服务")
+                // 启动服务
+                val serviceIntent = Intent(this, MainService::class.java)
+                serviceIntent.action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                serviceIntent.putExtra(EXT_MEDIA_PROJECTION_RES_INTENT, data)
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } else {
+                Log.e("MainActivity", "MediaProjection权限获取失败")
+                flutterMethodChannel?.invokeMethod(
+                    "show_message",
+                    mapOf("message" to "屏幕录制权限获取失败，远程控制可能无法正常工作")
+                )
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,6 +142,19 @@ class MainActivity : FlutterActivity() {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
+        
+        // 添加广播接收器，用于接收请求MediaProjection的广播
+        val mediaProjectionRequestReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACT_REQUEST_MEDIA_PROJECTION) {
+                    requestMediaProjection()
+                }
+            }
+        }
+        
+        // 注册广播接收器
+        val intentFilter = android.content.IntentFilter(ACT_REQUEST_MEDIA_PROJECTION)
+        registerReceiver(mediaProjectionRequestReceiver, intentFilter)
         
         // 应用启动时检查系统级权限状态并通知Flutter端
         if (checkSystemPermissions()) {
