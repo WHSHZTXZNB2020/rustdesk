@@ -55,6 +55,7 @@ class MainActivity : FlutterActivity() {
     private val channelTag = "mChannel"
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
+    private var handler: Handler? = null
 
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
@@ -147,8 +148,8 @@ class MainActivity : FlutterActivity() {
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
         
-        // 先执行原有逻辑
-        checkAccessibility()
+        // 先执行原有逻辑但移除对checkAccessibility的调用
+        // checkAccessibility()  // 移除此行调用
         handler = Handler(Looper.getMainLooper())
         
         // 然后添加广播接收器
@@ -181,7 +182,7 @@ class MainActivity : FlutterActivity() {
             if (hasSurfaceFlingerPermission) {
                 // 使用自定义Toast显示"已就绪"提示
                 try {
-                    ToastUtils.showReadyToast(this)
+                    showReadyToast() // 替换为直接实现
                 } catch (e: Exception) {
                     // 如果自定义Toast失败，回退到标准Toast
                     val toast = android.widget.Toast.makeText(
@@ -201,6 +202,17 @@ class MainActivity : FlutterActivity() {
         } else {
             Log.d(logTag, "系统级权限未授权")
         }
+    }
+
+    // 添加简单的showReadyToast方法代替ToastUtils
+    private fun showReadyToast() {
+        val toast = android.widget.Toast.makeText(
+            this,
+            "已就绪",
+            android.widget.Toast.LENGTH_SHORT
+        )
+        toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+        toast.show()
     }
 
     override fun onDestroy() {
