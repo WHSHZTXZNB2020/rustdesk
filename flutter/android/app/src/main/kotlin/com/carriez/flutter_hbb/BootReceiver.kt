@@ -12,11 +12,6 @@ import com.hjq.permissions.XXPermissions
 import io.flutter.embedding.android.FlutterActivity
 import android.os.Handler
 import android.os.Looper
-import com.carriez.flutter_hbb.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
-import com.carriez.flutter_hbb.EXT_INIT_FROM_BOOT
-import com.carriez.flutter_hbb.KEY_SHARED_PREFERENCES
-import com.carriez.flutter_hbb.KEY_START_ON_BOOT_OPT
-import com.carriez.flutter_hbb.InputService
 
 const val DEBUG_BOOT_COMPLETED = "com.carriez.flutter_hbb.DEBUG_BOOT_COMPLETED"
 
