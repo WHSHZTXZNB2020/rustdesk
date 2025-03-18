@@ -55,8 +55,20 @@ class MainActivity : FlutterActivity() {
     private val logTag = "mMainActivity"
     private var mainService: MainService? = null
 
+    // 增加屏幕捕获方法标记
+    private val CAPTURE_METHOD_SURFACE_FLINGER = 1
+    private val CAPTURE_METHOD_FRAME_BUFFER = 2
+    private val CAPTURE_METHOD_MEDIA_PROJECTION = 3
+
     private var isAudioStart = false
     private val audioRecordHandle = AudioRecordHandle(this, { false }, { isAudioStart })
+
+    const val ACT_INIT_MEDIA_PROJECTION_AND_SERVICE = "init_media_projection_and_service"
+    const val ACT_REQUEST_MEDIA_PROJECTION = "request_media_projection"
+    const val EXT_MEDIA_PROJECTION_RES_INTENT = "ext_media_projection_res_intent"
+    const val REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION = 6
+    const val REQ_REQUEST_MEDIA_PROJECTION = 5
+    const val RES_FAILED = 0
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -89,29 +101,92 @@ class MainActivity : FlutterActivity() {
         // 优先检查 ACCESS_SURFACE_FLINGER 权限
         val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
         val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        Log.d(logTag, "ACCESS_SURFACE_FLINGER权限: $hasSurfaceFlingerPermission")
         
         // 然后检查其他权限
+        val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
+        val hasCaptureVideoPermission = captureVideoPermission == PackageManager.PERMISSION_GRANTED
+        Log.d(logTag, "CAPTURE_VIDEO_OUTPUT权限: $hasCaptureVideoPermission")
+        
+        val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
+        val hasReadFrameBufferPermission = readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
+        Log.d(logTag, "READ_FRAME_BUFFER权限: $hasReadFrameBufferPermission")
+        
+        // 返回结果，只要有一种方式能用就可以
+        return hasSurfaceFlingerPermission || (hasCaptureVideoPermission && hasReadFrameBufferPermission)
+    }
+
+    // 新增方法：检查具体是哪种系统权限可用
+    private fun getAvailableCaptureMethod(): Int {
+        // 优先检查 ACCESS_SURFACE_FLINGER 权限
+        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+        
+        if (hasSurfaceFlingerPermission) {
+            Log.d(logTag, "将使用SURFACE_FLINGER方法捕获屏幕")
+            return CAPTURE_METHOD_SURFACE_FLINGER
+        }
+        
+        // 然后检查其他权限组合
         val captureVideoPermission = checkCallingOrSelfPermission(PERMISSION_CAPTURE_VIDEO_OUTPUT)
         val readFrameBufferPermission = checkCallingOrSelfPermission(PERMISSION_READ_FRAME_BUFFER)
         val hasOtherPermissions = captureVideoPermission == PackageManager.PERMISSION_GRANTED && 
                                 readFrameBufferPermission == PackageManager.PERMISSION_GRANTED
         
-        // 返回结果，只要有一种方式能用就可以
-        return hasSurfaceFlingerPermission || hasOtherPermissions
+        if (hasOtherPermissions) {
+            Log.d(logTag, "将使用FRAME_BUFFER方法捕获屏幕")
+            return CAPTURE_METHOD_FRAME_BUFFER
+        }
+        
+        // 所有系统权限都不可用，使用MediaProjection
+        Log.d(logTag, "系统权限不可用，将尝试使用MediaProjection")
+        return CAPTURE_METHOD_MEDIA_PROJECTION
     }
-    
-    // 移除不再需要的requestMediaProjection方法
-    // private fun requestMediaProjection() {
-    //     val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-    //         action = ACT_REQUEST_MEDIA_PROJECTION
-    //     }
-    //     startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
-    // }
 
-    // 修改onActivityResult，移除MediaProjection相关处理
+    // 恢复并改进requestMediaProjection方法
+    private fun requestMediaProjection() {
+        Log.d(logTag, "请求MediaProjection权限")
+        val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
+            action = ACT_REQUEST_MEDIA_PROJECTION
+        }
+        startActivityForResult(intent, REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION)
+    }
+
+    // 修改onActivityResult，处理MediaProjection相关结果
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        // 系统级权限不需要ActivityResult处理
+        
+        if (requestCode == REQ_INVOKE_PERMISSION_ACTIVITY_MEDIA_PROJECTION) {
+            Log.d(logTag, "MediaProjection权限请求返回: $resultCode")
+            if (resultCode == RESULT_OK && data != null) {
+                // MediaProjection授权成功，启动服务
+                val intent = Intent(this, MainService::class.java).apply {
+                    action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                    putExtra(EXT_MEDIA_PROJECTION_RES_INTENT, data)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+                
+                // 通知Flutter端MediaProjection已就绪
+                activity.runOnUiThread {
+                    flutterMethodChannel?.invokeMethod(
+                        "on_state_changed",
+                        mapOf("name" to "media", "value" to "true")
+                    )
+                }
+            } else {
+                // MediaProjection授权失败，通知Flutter端
+                activity.runOnUiThread {
+                    flutterMethodChannel?.invokeMethod(
+                        "on_state_changed",
+                        mapOf("name" to "media", "value" to "false")
+                    )
+                }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -185,20 +260,32 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler
                     }
                     
-                    // 使用系统级权限直接启动服务，不再使用MediaProjection
-                    if (checkSystemPermissions()) {
-                        val intent = Intent(this, MainService::class.java).apply {
-                            action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                    // 获取可用的屏幕捕获方法
+                    val captureMethod = getAvailableCaptureMethod()
+                    Log.d(logTag, "初始化服务，捕获方法: $captureMethod")
+                    
+                    when (captureMethod) {
+                        CAPTURE_METHOD_SURFACE_FLINGER, CAPTURE_METHOD_FRAME_BUFFER -> {
+                            // 使用系统级权限直接启动服务
+                            val intent = Intent(this, MainService::class.java).apply {
+                                action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                                putExtra("capture_method", captureMethod)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(intent)
+                            } else {
+                                startService(intent)
+                            }
+                            result.success(true)
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
+                        
+                        CAPTURE_METHOD_MEDIA_PROJECTION -> {
+                            // 使用MediaProjection API
+                            requestMediaProjection()
+                            // 不立即返回结果，等待onActivityResult中处理
+                            // 这里不能返回true，因为权限请求可能会被用户拒绝
+                            result.success(null)
                         }
-                        result.success(true)
-                    } else {
-                        Log.e(logTag, "缺少必要的系统级权限，无法启动服务")
-                        result.success(false)
                     }
                 }
                 "init_service_without_permission" -> {
@@ -214,20 +301,31 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         
-                        // 在定制系统中，检查系统级权限替代MediaProjection请求
-                        if (checkSystemPermissions()) {
-                            val intent = Intent(this, MainService::class.java).apply {
-                                action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                        // 获取可用的屏幕捕获方法
+                        val captureMethod = getAvailableCaptureMethod()
+                        Log.d(logTag, "初始化服务(无权限模式)，捕获方法: $captureMethod")
+                        
+                        when (captureMethod) {
+                            CAPTURE_METHOD_SURFACE_FLINGER, CAPTURE_METHOD_FRAME_BUFFER -> {
+                                // 使用系统级权限直接启动服务
+                                val intent = Intent(this, MainService::class.java).apply {
+                                    action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
+                                    putExtra("capture_method", captureMethod)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    startForegroundService(intent)
+                                } else {
+                                    startService(intent)
+                                }
+                                result.success(true)
                             }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                startForegroundService(intent)
-                            } else {
-                                startService(intent)
+                            
+                            CAPTURE_METHOD_MEDIA_PROJECTION -> {
+                                // 使用MediaProjection API
+                                requestMediaProjection()
+                                // 不立即返回结果
+                                result.success(null)
                             }
-                            result.success(true)
-                        } else {
-                            Log.e(logTag, "缺少系统级权限，无法启动服务")
-                            result.success(false)
                         }
                     } catch (e: Exception) {
                         Log.e(logTag, "启动服务失败: ${e.message}")
