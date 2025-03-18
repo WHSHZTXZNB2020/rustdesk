@@ -34,37 +34,30 @@ import hbb.MessageOuterClass.KeyboardMode
 import kotlin.concurrent.thread
 import java.lang.reflect.Method
 
-// 引入common.kt中的常量
-import com.carriez.flutter_hbb.LEFT_DOWN
-import com.carriez.flutter_hbb.LEFT_MOVE
-import com.carriez.flutter_hbb.LEFT_UP
-import com.carriez.flutter_hbb.RIGHT_UP
-import com.carriez.flutter_hbb.BACK_UP
-import com.carriez.flutter_hbb.WHEEL_BUTTON_DOWN
-import com.carriez.flutter_hbb.WHEEL_BUTTON_UP
-import com.carriez.flutter_hbb.WHEEL_DOWN
-import com.carriez.flutter_hbb.WHEEL_UP
-import com.carriez.flutter_hbb.TOUCH_SCALE_START
-import com.carriez.flutter_hbb.TOUCH_SCALE
-import com.carriez.flutter_hbb.TOUCH_SCALE_END
-import com.carriez.flutter_hbb.TOUCH_PAN_START
-import com.carriez.flutter_hbb.TOUCH_PAN_UPDATE
-import com.carriez.flutter_hbb.TOUCH_PAN_END
-import com.carriez.flutter_hbb.WHEEL_STEP
-import com.carriez.flutter_hbb.WHEEL_DURATION
-import com.carriez.flutter_hbb.LONG_TAP_DELAY
-import com.carriez.flutter_hbb.DEFAULT_NOTIFY_TITLE
-import com.carriez.flutter_hbb.DEFAULT_NOTIFY_TEXT
-import com.carriez.flutter_hbb.DEFAULT_NOTIFY_ID
-import com.carriez.flutter_hbb.NOTIFY_ID_OFFSET
-import com.carriez.flutter_hbb.type
-import com.carriez.flutter_hbb.MIME_TYPE
-import com.carriez.flutter_hbb.MAX_SCREEN_SIZE
-import com.carriez.flutter_hbb.VIDEO_KEY_BIT_RATE
-import com.carriez.flutter_hbb.VIDEO_KEY_FRAME_RATE
-
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
+
+const val LEFT_DOWN = 9
+const val LEFT_MOVE = 8
+const val LEFT_UP = 10
+const val RIGHT_UP = 18
+// (BUTTON_BACK << 3) | BUTTON_UP
+const val BACK_UP = 66
+const val WHEEL_BUTTON_DOWN = 33
+const val WHEEL_BUTTON_UP = 34
+const val WHEEL_DOWN = 523331
+const val WHEEL_UP = 963
+
+const val TOUCH_SCALE_START = 1
+const val TOUCH_SCALE = 2
+const val TOUCH_SCALE_END = 3
+const val TOUCH_PAN_START = 4
+const val TOUCH_PAN_UPDATE = 5
+const val TOUCH_PAN_END = 6
+
+const val WHEEL_STEP = 120
+const val WHEEL_DURATION = 50L
+const val LONG_TAP_DELAY = 200L
 
 // 定义InputManager的常量，以防止编译错误
 private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
@@ -76,24 +69,6 @@ private val MAP_MODE = KeyboardMode.Map.number
 
 // InputService类用于处理输入事件
 class InputService : Service {
-    // 默认构造函数
-    constructor() : super() {
-        Log.d(logTag, "InputService created with default constructor")
-    }
-    
-    // 带Context参数的构造函数
-    constructor(context: Context) : super() {
-        Log.d(logTag, "InputService created with context constructor")
-        initializeWithContext(context)
-        
-        // 通过Intent启动服务，确保服务在后台运行
-        val intent = Intent(context, InputService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-    }
 
     companion object {
         var ctx: InputService? = null
@@ -130,6 +105,17 @@ class InputService : Service {
     // 事件处理状态
     private var lastDownTime = 0L   // 上次DOWN事件的时间戳
     
+    // 提供公开的无参构造函数
+    constructor() : super() {
+        Log.d(logTag, "InputService created with default constructor")
+    }
+    
+    // 提供带Context参数的公开构造函数
+    constructor(context: Context) : super() {
+        Log.d(logTag, "InputService created with context constructor")
+        initializeWithContext(context)
+    }
+    
     override fun onCreate() {
         super.onCreate()
         Log.d(logTag, "InputService onCreate called")
@@ -137,31 +123,6 @@ class InputService : Service {
         // 如果还未初始化，则使用applicationContext初始化
         if (!::appContext.isInitialized) {
             initializeWithContext(applicationContext)
-        }
-        
-        // 确保服务在前台运行，避免被系统杀死
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channelId = "rustdesk_input_service"
-            val channelName = "RustDesk Input Service"
-            val channel = android.app.NotificationChannel(
-                channelId,
-                channelName,
-                android.app.NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                setShowBadge(false)
-                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-            }
-            
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            notificationManager.createNotificationChannel(channel)
-            
-            val notification = android.app.Notification.Builder(this, channelId)
-                .setContentTitle("RustDesk")
-                .setContentText("Input Service Running")
-                .setSmallIcon(android.R.drawable.ic_menu_info_details)
-                .build()
-            
-            startForeground(1337, notification)
         }
     }
 
@@ -742,9 +703,8 @@ class InputService : Service {
             handler.removeCallbacksAndMessages(null)
             timer.cancel()
             ctx = null
-            stopSelf()
         } catch (e: Exception) {
-            Log.e(logTag, "Error stopping input service: ${e.message}")
+            Log.e(logTag, "Error in disableSelf: ${e.message}")
         }
     }
 }
