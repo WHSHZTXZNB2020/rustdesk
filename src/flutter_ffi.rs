@@ -2382,7 +2382,6 @@ pub mod server_side {
     pub unsafe extern "system" fn Java_ffi_FFI_startService(_env: JNIEnv, _class: JClass) {
         log::debug!("startService from jvm");
         config::Config::set_option("stop-service".into(), "".into());
-        crate::rendezvous_mediator::RendezvousMediator::restart();
     }
 
     #[no_mangle]
@@ -2431,5 +2430,20 @@ pub mod server_side {
         _class: JClass,
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_sendAuthorizationResponse(
+        _env: JNIEnv,
+        _class: JClass,
+        id: jint,
+        res: jboolean,
+    ) {
+        log::debug!("sendAuthorizationResponse from jvm: id={}, res={}", id, res);
+        if res == JNI_TRUE {
+            crate::ui_cm_interface::authorize(id);
+        } else {
+            crate::ui_cm_interface::close(id);
+        }
     }
 }
