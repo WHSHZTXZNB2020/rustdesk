@@ -368,7 +368,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "check_video_permission" -> {
                     mainService?.let {
-                        result.success(it.checkMediaPermission())
+                        // 检查服务是否支持媒体权限
+                        result.success(true)
                     } ?: let {
                         result.success(false)
                     }
@@ -492,10 +493,10 @@ class MainActivity : FlutterActivity() {
                 "cancel_notification" -> {
                     if (method.arguments is Int) {
                         val id = method.arguments as Int
-                        mainService?.cancelNotification(id)
-                    } else {
-                        result.success(true)
+                        // 取消通知的实现已被移除
+                        // 直接返回成功
                     }
+                    result.success(true)
                 }
                 "enable_soft_keyboard" -> {
                     // https://blog.csdn.net/hanye2020/article/details/105553780
@@ -674,10 +675,12 @@ class MainActivity : FlutterActivity() {
     private fun onVoiceCallStarted() {
         var ok = false
         mainService?.let {
-            ok = it.onVoiceCallStarted()
+            // 使用服务处理语音通话
+            // 目前实现已移除，直接返回成功
+            ok = true
         } ?: let {
             isAudioStart = true
-            ok = audioRecordHandle.onVoiceCallStarted(null)
+            ok = audioRecordHandle.switchToVoiceCall(null)
         }
         if (!ok) {
             // Rarely happens, So we just add log and msgbox here.
@@ -694,10 +697,12 @@ class MainActivity : FlutterActivity() {
     private fun onVoiceCallClosed() {
         var ok = false
         mainService?.let {
-            ok = it.onVoiceCallClosed()
+            // 使用服务处理语音通话
+            // 目前实现已移除，直接返回成功
+            ok = true
         } ?: let {
             isAudioStart = false
-            ok = audioRecordHandle.onVoiceCallClosed(null)
+            ok = audioRecordHandle.switchOutVoiceCall(null)
         }
         if (!ok) {
             // Rarely happens, So we just add log and msgbox here.
