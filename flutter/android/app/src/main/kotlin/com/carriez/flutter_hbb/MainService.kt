@@ -61,6 +61,7 @@ const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
 const val DEFAULT_NOTIFY_ID = 1
 const val NOTIFY_ID_OFFSET = 100
+const val TIMEOUT_US = 10000L  // 10秒超时时间
 
 const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
 
@@ -302,10 +303,11 @@ class MainService : Service() {
         isStart = true
         Log.d(logTag, "onCreate")
         
-        // 初始化音频记录器
-        audioRecordHandle = AudioRecordHandle(applicationContext, 
-            { isVideoStart },
-            { isAudioStart }
+        // 初始化音频记录器 - 使用正确的方法引用
+        audioRecordHandle = AudioRecordHandle(
+            applicationContext,
+            { isVideoStart() },  // 修复为正确的函数调用
+            { isAudioStart() }   // 修复为正确的函数调用
         )
         
         // 创建通知通道
