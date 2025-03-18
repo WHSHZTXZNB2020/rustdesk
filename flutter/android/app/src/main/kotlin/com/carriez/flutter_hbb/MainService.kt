@@ -49,6 +49,13 @@ import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
 import java.lang.reflect.Method
+import android.os.Handler
+import android.os.Looper
+import android.os.IBinder
+import android.os.Process
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import com.carriez.flutter_hbb.AudioRecordHandle
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -283,9 +290,25 @@ class MainService : Service() {
     private var surfaceView: SurfaceView? = null
     private var videoEncoder: MediaCodec? = null
 
+    // 添加其他属性和变量
+    private var screenCapture: ScreenCapture? = null
+    private lateinit var audioRecordHandle: AudioRecordHandle
+
     override fun onCreate() {
         super.onCreate()
-        Log.d(logTag, "service onCreate")
+        logTag = "MainService"
+        isStart = true
+        Log.d(logTag, "onCreate")
+        
+        // 初始化音频记录器
+        audioRecordHandle = AudioRecordHandle(applicationContext, 
+            { isStart -> if (isStart) Log.d(logTag, "音频记录开始") else Log.d(logTag, "音频记录停止") },
+            { msg -> Log.e(logTag, "音频记录错误: $msg") }
+        )
+        
+        // 创建通知通道
+        createForegroundNotification()
+        
         service = this  // 设置静态引用
     }
 
