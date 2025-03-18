@@ -36,10 +36,6 @@ import kotlin.concurrent.thread
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
-import com.carriez.flutter_hbb.ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
-import com.carriez.flutter_hbb.KEY_SHARED_PREFERENCES
-import com.carriez.flutter_hbb.KEY_APP_DIR_CONFIG_PATH
-import com.carriez.flutter_hbb.InputService
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -392,16 +388,8 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "stop_input" -> {
-                    // 停止InputService
-                    val inputServiceCtx = InputService.ctx
-                    if (inputServiceCtx != null) {
-                        // 先通知InputService停止自身
-                        inputServiceCtx.disableSelf()
-                        // 确保ctx被清空
-                        InputService.ctx = null
-                        // 同时也通过stopService确保服务被停止
-                        stopService(Intent(this, InputService::class.java))
-                    }
+                    InputService.ctx?.disableSelf()
+                    InputService.ctx = null
                     Companion.flutterMethodChannel?.invokeMethod(
                         "on_state_changed",
                         mapOf("name" to "input", "value" to InputService.isOpen.toString())
@@ -648,8 +636,7 @@ class MainActivity : FlutterActivity() {
         Log.d(logTag, "确保本地UI交互能力")
         try {
             // 1. 暂时暂停输入服务的事件处理
-            val inputService = InputService.ctx
-            if (inputService != null) {
+            InputService.ctx?.let { service ->
                 // 记录当前应用窗口位置和前台状态
                 window.decorView.post {
                     val appPackageName = packageName
