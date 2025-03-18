@@ -2,7 +2,6 @@ use jni::objects::JByteBuffer;
 use jni::objects::JString;
 use jni::objects::JValue;
 use jni::sys::jboolean;
-use jni::sys::jint;
 use jni::JNIEnv;
 use jni::{
     objects::{GlobalRef, JClass, JObject},
@@ -130,26 +129,6 @@ pub extern "system" fn Java_ffi_FFI_onVideoFrameUpdate(
     if let Ok(data) = env.get_direct_buffer_address(&jb) {
         if let Ok(len) = env.get_direct_buffer_capacity(&jb) {
             VIDEO_RAW.lock().unwrap().update(data, len);
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_ffi_FFI_pushFrame(
-    env: JNIEnv,
-    _class: JClass,
-    width: jint,
-    height: jint,
-    buffer: JObject,
-    stride: jint,
-    buffer_size: jint,
-) {
-    let jb = JByteBuffer::from(buffer);
-    if let Ok(data) = env.get_direct_buffer_address(&jb) {
-        if let Ok(len) = env.get_direct_buffer_capacity(&jb) {
-            if len as jint >= buffer_size {
-                VIDEO_RAW.lock().unwrap().update(data, len);
-            }
         }
     }
 }
