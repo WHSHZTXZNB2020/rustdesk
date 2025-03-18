@@ -2446,4 +2446,41 @@ pub mod server_side {
             crate::ui_cm_interface::close(id);
         }
     }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_onVoiceCallStarted(
+        _env: JNIEnv,
+        _class: JClass,
+    ) {
+        log::debug!("onVoiceCallStarted from jvm");
+        // 根据实际需求实现
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_onVoiceCallClosed(
+        _env: JNIEnv,
+        _class: JClass,
+    ) {
+        log::debug!("onVoiceCallClosed from jvm");
+        // 根据实际需求实现
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_cancelNotification(
+        _env: JNIEnv,
+        _class: JClass,
+    ) {
+        log::debug!("cancelNotification from jvm");
+        // 根据实际需求实现
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_checkMediaPermission(
+        _env: JNIEnv,
+        _class: JClass,
+    ) -> jboolean {
+        log::debug!("checkMediaPermission from jvm");
+        // 根据实际需求实现，这里默认返回true
+        JNI_TRUE
+    }
 }
