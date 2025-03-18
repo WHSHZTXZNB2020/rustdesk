@@ -26,7 +26,6 @@ object FFI {
     external fun onClipboardUpdate(clips: ByteBuffer)
     external fun isServiceClipboardEnabled(): Boolean
     
-    // 添加可能存在的函数变体
-    external fun autorize(auth: String)
-    external fun authorize(auth: String) // 备选拼写
+    // 添加授权相关方法
+    external fun sendAuthorizationResponse(id: Int, res: Boolean)
 }
