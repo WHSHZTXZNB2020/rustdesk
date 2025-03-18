@@ -59,48 +59,6 @@ const val PERMISSION_INJECT_EVENTS = "android.permission.INJECT_EVENTS"
 const val KEY_SHARED_PREFERENCES = "KEY_SHARED_PREFERENCES"
 const val KEY_START_ON_BOOT_OPT = "KEY_START_ON_BOOT_OPT"
 
-// 添加通知相关常量
-const val DEFAULT_NOTIFY_TITLE = "远程协助"
-const val DEFAULT_NOTIFY_TEXT = "Service is running"
-const val DEFAULT_NOTIFY_ID = 1
-const val NOTIFY_ID_OFFSET = 100
-
-// 添加媒体相关常量
-const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
-
-// 添加视频相关常量
-const val MAX_SCREEN_SIZE = 1400
-const val VIDEO_KEY_BIT_RATE = 1024_000
-const val VIDEO_KEY_FRAME_RATE = 30
-
-// 添加通用类型常量
-const val type = "type"
-
-// 鼠标事件常量
-const val LEFT_DOWN = 1
-const val LEFT_MOVE = 8
-const val LEFT_UP = 10
-const val RIGHT_UP = 18
-const val BACK_UP = 66
-// 添加更多鼠标事件常量
-const val WHEEL_BUTTON_DOWN = 33
-const val WHEEL_BUTTON_UP = 34
-const val WHEEL_DOWN = 523331
-const val WHEEL_UP = 963
-
-// 添加触摸事件常量
-const val TOUCH_SCALE_START = 1
-const val TOUCH_SCALE = 2
-const val TOUCH_SCALE_END = 3
-const val TOUCH_PAN_START = 4
-const val TOUCH_PAN_UPDATE = 5
-const val TOUCH_PAN_END = 6
-
-// 添加滚轮相关常量
-const val WHEEL_STEP = 120
-const val WHEEL_DURATION = 50L
-const val LONG_TAP_DELAY = 200L
-
 @SuppressLint("ConstantLocale")
 val LOCAL_NAME = Locale.getDefault().toString()
 val SCREEN_INFO = Info(0, 0, 1, 200)
