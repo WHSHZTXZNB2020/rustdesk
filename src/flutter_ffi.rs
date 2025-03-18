@@ -2351,7 +2351,7 @@ pub mod server_side {
     use jni::{
         errors::{Error as JniError, Result as JniResult},
         objects::{JClass, JObject, JString},
-        sys::{jboolean, jstring, jint, JNI_TRUE},
+        sys::{jboolean, jstring},
         JNIEnv,
     };
 
@@ -2382,6 +2382,7 @@ pub mod server_side {
     pub unsafe extern "system" fn Java_ffi_FFI_startService(_env: JNIEnv, _class: JClass) {
         log::debug!("startService from jvm");
         config::Config::set_option("stop-service".into(), "".into());
+        crate::rendezvous_mediator::RendezvousMediator::restart();
     }
 
     #[no_mangle]
@@ -2430,86 +2431,5 @@ pub mod server_side {
         _class: JClass,
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_sendAuthorizationResponse(
-        _env: JNIEnv,
-        _class: JClass,
-        id: jint,
-        res: jboolean,
-    ) {
-        log::debug!("sendAuthorizationResponse from jvm: id={}, res={}", id, res);
-        if res == JNI_TRUE {
-            crate::ui_cm_interface::authorize(id);
-        } else {
-            crate::ui_cm_interface::close(id);
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_authorize(
-        _env: JNIEnv,
-        _class: JClass,
-        id: jint,
-    ) {
-        log::debug!("authorize from jvm: id={}", id);
-        crate::ui_cm_interface::authorize(id);
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_autorize(
-        env: JNIEnv,
-        _class: JClass,
-        auth: JString,
-    ) {
-        log::debug!("autorize from jvm with auth string");
-        let mut env = env;
-        if let Ok(auth) = env.get_string(&auth) {
-            let auth_str: String = auth.into();
-            if let Ok(auth_obj) = serde_json::from_str::<serde_json::Value>(&auth_str) {
-                if let Some(id) = auth_obj.get("id").and_then(|v| v.as_i64()) {
-                    crate::ui_cm_interface::authorize(id as i32);
-                }
-            }
-        }
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_onVoiceCallStarted(
-        _env: JNIEnv,
-        _class: JClass,
-    ) {
-        log::debug!("onVoiceCallStarted from jvm");
-        // 这只是一个空实现，实际功能在kotlin侧
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_onVoiceCallClosed(
-        _env: JNIEnv,
-        _class: JClass,
-    ) {
-        log::debug!("onVoiceCallClosed from jvm");
-        // 这只是一个空实现，实际功能在kotlin侧
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_cancelNotification(
-        _env: JNIEnv,
-        _class: JClass,
-        id: jint,
-    ) {
-        log::debug!("cancelNotification from jvm: id={}", id);
-        // 这只是一个空实现，实际功能在kotlin侧
-    }
-
-    #[no_mangle]
-    pub unsafe extern "system" fn Java_ffi_FFI_checkMediaPermission(
-        _env: JNIEnv,
-        _class: JClass,
-    ) -> jboolean {
-        log::debug!("checkMediaPermission from jvm");
-        // 默认返回true，实际检查在kotlin侧
-        JNI_TRUE
     }
 }
