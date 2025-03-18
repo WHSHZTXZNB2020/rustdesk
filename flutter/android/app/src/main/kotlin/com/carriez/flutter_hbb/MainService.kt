@@ -143,16 +143,10 @@ class MainService : Service() {
                     
                     // 立即自动授权连接
                     if (!(jsonObject["authorized"] as Boolean)) {
-                        // 如果连接未授权，发送授权响应
-                        val auth = JSONObject().apply {
-                            put("id", id)
-                            put("res", true)  // 始终返回true表示接受连接
-                        }
-                        // 使用现有的FFI接口代替autorize
+                        // 如果连接未授权，使用sendAuthorizationResponse方法发送授权响应
                         try {
-                            // 直接使用JSON作为参数调用FFI startServer方法
-                            // 这会将授权信息传递到Rust端
-                            FFI.startServer(auth.toString(), "connection_response")
+                            FFI.sendAuthorizationResponse(id, true)
+                            Log.d(logTag, "成功发送连接授权响应")
                         } catch (e: Exception) {
                             Log.e(logTag, "Failed to send connection authorization: ${e.message}")
                         }
@@ -177,11 +171,10 @@ class MainService : Service() {
                                 put("res", true)  // 始终返回true表示接受语音通话
                                 put("is_voice_call", true)
                             }
-                            // 使用现有的FFI接口代替autorize
+                            // 使用sendAuthorizationResponse方法发送语音通话授权响应
                             try {
-                                // 直接使用JSON作为参数调用FFI startServer方法
-                                // 这会将授权信息传递到Rust端
-                                FFI.startServer(auth.toString(), "voice_call_response") 
+                                FFI.sendAuthorizationResponse(id, true)
+                                Log.d(logTag, "成功发送语音通话授权响应")
                             } catch (e: Exception) {
                                 Log.e(logTag, "Failed to send voice call authorization: ${e.message}")
                             }
@@ -217,7 +210,6 @@ class MainService : Service() {
                     isHalfScale = halfScale
                     updateScreenInfo(resources.configuration.orientation)
                 }
-                
             }
             else -> {
             }
@@ -331,7 +323,7 @@ class MainService : Service() {
                             mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                             mediaProjection = mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, data)
                             mediaProjection?.registerCallback(mediaProjectionCallback, null)
-                        } else {
+        } else {
                             Log.e(logTag, "MediaProjection数据为空")
                             stopSelf()
                             return START_NOT_STICKY
@@ -460,11 +452,11 @@ class MainService : Service() {
                 Log.d(logTag, "在Android 11+上使用SurfaceFlinger")
                 
                 // 创建Surface
-                if (surface == null) {
+        if (surface == null) {
                     surface = createInputSurface()
                     if (surface == null) {
                         Log.e(logTag, "无法创建Surface，SurfaceFlinger捕获失败")
-                        return false
+            return false
                     }
                 }
                 
@@ -498,8 +490,8 @@ class MainService : Service() {
                 } catch (e: Exception) {
                     Log.e(logTag, "Android 11+ SurfaceFlinger捕获异常: ${e.message}")
                     return false
-                }
-            } else {
+            }
+        } else {
                 // Android 10及以下的原始实现
                 if (surface == null) {
                     surface = createInputSurface()
@@ -523,7 +515,7 @@ class MainService : Service() {
                 }
                 
                 startEncode()
-                return true
+        return true
             }
         } catch (e: Exception) {
             Log.e(logTag, "SurfaceFlinger捕获失败: ${e.message}", e)
@@ -540,7 +532,7 @@ class MainService : Service() {
                 Log.d(logTag, "在Android 11+上使用FrameBuffer")
                 
                 // 创建Surface
-                if (surface == null) {
+            if (surface == null) {
                     surface = createInputSurface()
                     if (surface == null) {
                         Log.e(logTag, "无法创建Surface，FrameBuffer捕获失败")
@@ -584,7 +576,7 @@ class MainService : Service() {
                 } catch (e: SecurityException) {
                     Log.e(logTag, "Android 11+ FrameBuffer权限错误: ${e.message}")
                     return false
-                } catch (e: Exception) {
+        } catch (e: Exception) {
                     Log.e(logTag, "Android 11+ FrameBuffer捕获异常: ${e.message}")
                     return false
                 }
@@ -603,9 +595,9 @@ class MainService : Service() {
                     width,
                     height,
                     density,
-                    surface,
-                    VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
-                )
+                surface,
+                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            )
                 
                 if (virtualDisplay == null) {
                     return false
@@ -817,6 +809,9 @@ class MainService : Service() {
         }
         
         try {
+            // 启用视频帧传递
+            FFI.setFrameRawEnable("video", true)
+            
             // 创建一个编码线程
             Thread {
                 val bufferInfo = MediaCodec.BufferInfo()
@@ -829,14 +824,10 @@ class MainService : Service() {
                         if (outputBufferId >= 0) {
                             val encodedBuffer = videoEncoder!!.getOutputBuffer(outputBufferId)
                             if (encodedBuffer != null) {
-                                // 处理编码数据
-                                val encodedBytes = ByteArray(bufferInfo.size)
-                                encodedBuffer.get(encodedBytes)
-                                
-                                // 将编码数据发送到Rust端
-                                // 判断是否是关键帧
-                                val isKeyFrame = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-                                ffi.FFI.pushEncodedVideoFrame(encodedBytes, isKeyFrame)
+                                // 重置缓冲区位置以便读取全部数据
+                                encodedBuffer.rewind()
+                                // 将缓冲区传递给Rust端
+                                FFI.onVideoFrameUpdate(encodedBuffer)
                                 
                                 // 释放缓冲区
                                 videoEncoder!!.releaseOutputBuffer(outputBufferId, false)
@@ -852,6 +843,9 @@ class MainService : Service() {
                 } catch (e: Exception) {
                     Log.e(logTag, "编码过程异常: ${e.message}", e)
                 } finally {
+                    // 停用视频帧传递
+                    FFI.setFrameRawEnable("video", false)
+                    
                     // 清理资源
                     try {
                         videoEncoder?.stop()
@@ -873,6 +867,7 @@ class MainService : Service() {
     fun stopCapture() {
         Log.d(logTag, "停止屏幕捕获")
         
+        FFI.setFrameRawEnable("video", false)
         _isStart = false
         
         try {
@@ -941,7 +936,7 @@ class MainService : Service() {
         fun getString(key: String, defaultValue: String): String {
             return try {
                 getStringMethod?.invoke(null, key, defaultValue) as String? ?: defaultValue
-            } catch (e: Exception) {
+        } catch (e: Exception) {
                 defaultValue
             }
         }
@@ -949,21 +944,63 @@ class MainService : Service() {
         fun getBoolean(key: String, defaultValue: Boolean): Boolean {
             return try {
                 getBooleanMethod?.invoke(null, key, defaultValue) as Boolean? ?: defaultValue
-            } catch (e: Exception) {
+        } catch (e: Exception) {
                 defaultValue
             }
         }
     }
-}
 
-// FFI相关扩展
-object FFI {
-    // 将编码后的视频帧发送到Rust端
-    fun pushEncodedVideoFrame(data: ByteArray, flags: Int) {
-        // 判断是否是关键帧
-        val isKeyFrame = (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-        
-        // 调用Rust函数发送编码帧
-        ffi.FFI.pushEncodedVideoFrame(data, isKeyFrame)
+    // 恢复原始的updateScreenInfo方法
+    private fun updateScreenInfo(orientation: Int) {
+        var w: Int
+        var h: Int
+        var dpi: Int
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        @Suppress("DEPRECATION")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val m = windowManager.maximumWindowMetrics
+            w = m.bounds.width()
+            h = m.bounds.height()
+            dpi = resources.configuration.densityDpi
+        } else {
+            val dm = DisplayMetrics()
+            windowManager.defaultDisplay.getRealMetrics(dm)
+            w = dm.widthPixels
+            h = dm.heightPixels
+            dpi = dm.densityDpi
+        }
+
+        val max = max(w,h)
+        val min = min(w,h)
+        if (orientation == ORIENTATION_LANDSCAPE) {
+            w = max
+            h = min
+        } else {
+            w = min
+            h = max
+        }
+        Log.d(logTag,"updateScreenInfo:w:$w,h:$h")
+        var scale = 1
+        if (w != 0 && h != 0) {
+            if (isHalfScale == true && (w > MAX_SCREEN_SIZE || h > MAX_SCREEN_SIZE)) {
+                scale = 2
+                w /= scale
+                h /= scale
+                dpi /= scale
+            }
+            if (width != w) {
+                width = w
+                height = h
+                density = dpi
+                if (_isStart) {
+                    stopCapture()
+                    FFI.refreshScreen()
+                    startCapture()
+                } else {
+                    FFI.refreshScreen()
+                }
+            }
+        }
     }
 }
