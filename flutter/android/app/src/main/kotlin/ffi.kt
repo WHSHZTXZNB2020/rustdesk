@@ -28,4 +28,14 @@ object FFI {
     
     // 添加授权相关方法
     external fun sendAuthorizationResponse(id: Int, res: Boolean)
+    
+    // 增加语音通话相关方法
+    external fun onVoiceCallStarted()
+    external fun onVoiceCallClosed()
+    
+    // 增加通知相关
+    external fun cancelNotification()
+    
+    // 增加权限检查相关
+    external fun checkMediaPermission(): Boolean
 }
