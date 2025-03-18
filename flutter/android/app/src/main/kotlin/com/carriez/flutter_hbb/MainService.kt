@@ -26,6 +26,8 @@ import android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
 import android.hardware.display.VirtualDisplay
 import android.hardware.display.VirtualDisplay.Callback
 import android.media.*
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.*
 import android.util.DisplayMetrics
 import android.util.Log
@@ -46,6 +48,8 @@ import org.json.JSONObject
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
+import android.app.Activity.RESULT_OK
+import android.media.MediaCodecInfo.CodecCapabilities
 
 const val DEFAULT_NOTIFY_TITLE = "远程协助"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
@@ -377,9 +381,9 @@ class MainService : Service() {
                 Log.d(logTag, "收到MediaProjection结果，使用MediaProjection进行屏幕捕获")
                 
                 // 获取MediaProjection
-                val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 try {
-                    val mediaProjection = mediaProjectionManager.getMediaProjection(RESULT_OK, mediaProjectionIntent)
+                    val mediaProjection = mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, mediaProjectionIntent)
                     if (mediaProjection != null) {
                         // 初始化屏幕捕获（使用MediaProjection）
                         setupMediaProjection(mediaProjection)
@@ -581,21 +585,29 @@ class MainService : Service() {
             
             // 通知用户我们需要请求屏幕录制权限
             Handler(Looper.getMainLooper()).post {
-                MainActivity.flutterMethodChannel?.invokeMethod(
-                    "show_message",
-                    mapOf("message" to "正在尝试请求屏幕录制权限...")
-                )
-                
-                // 发送一个广播到MainActivity请求MediaProjection
-                val intent = Intent(ACT_REQUEST_MEDIA_PROJECTION)
-                intent.setPackage(packageName)
-                sendBroadcast(intent)
+                try {
+                    MainActivity.flutterMethodChannel?.invokeMethod(
+                        "show_message",
+                        mapOf("message" to "正在尝试请求屏幕录制权限...")
+                    )
+                    
+                    // 发送一个广播到MainActivity请求MediaProjection
+                    val intent = Intent(ACT_REQUEST_MEDIA_PROJECTION)
+                    intent.setPackage(packageName)
+                    sendBroadcast(intent)
+                } catch (e: Exception) {
+                    Log.e(logTag, "发送MediaProjection请求时出错: ${e.message}")
+                }
             }
             
             // 等待MediaProjection结果，设置一个超时
             var timeoutCounter = 0
-            while (!_isReady && timeoutCounter < 50) { // 最多等待5秒
-                Thread.sleep(100)
+            while (!_isReady && timeoutCounter < 50 && !captureSuccess) { // 最多等待5秒
+                try {
+                    Thread.sleep(100)
+                } catch (e: InterruptedException) {
+                    // 忽略中断
+                }
                 timeoutCounter++
             }
             
@@ -952,7 +964,8 @@ class MainService : Service() {
             // 创建不同配置的虚拟显示，以适应Android 11
             virtualDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 // Android 11及以上版本可能需要特殊标志
-                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED
+                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                // 避免使用可能不存在的标志
                 displayManager?.createVirtualDisplay(
                     "RustDesk-SystemPerm-Display-R",
                     SCREEN_INFO.width,
@@ -1019,7 +1032,7 @@ class MainService : Service() {
             format.setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_KEY_BIT_RATE)
             format.setInteger(MediaFormat.KEY_FRAME_RATE, VIDEO_KEY_FRAME_RATE)
             format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            format.setInteger(MediaFormat.KEY_COLOR_FORMAT, COLOR_FormatSurface)
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatSurface)
             
             // 创建编码器
             videoEncoder = MediaCodec.createEncoderByType(MIME_TYPE)
@@ -1031,7 +1044,8 @@ class MainService : Service() {
             // 创建虚拟显示
             virtualDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 // Android 11及以上版本可能需要特殊标志
-                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED
+                val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                // 为了兼容性，避免使用可能不存在的常量
                 displayManager?.createVirtualDisplay(
                     "RustDesk-VP9-SystemPerm-Display-R",
                     SCREEN_INFO.width,
