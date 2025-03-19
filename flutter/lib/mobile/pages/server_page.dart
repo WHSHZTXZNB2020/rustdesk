@@ -540,8 +540,8 @@ void androidChannelInit() {
         debugPrint("收到系统权限检查消息: $arguments");
         final hasPermission = arguments["has_permission"] as bool? ?? false;
         if (!hasPermission) {
-          // 使用WidgetsBinding确保在UI线程执行
-          WidgetsBinding.instance.addPostFrameCallback((_) {
+          // 使用Timer延迟300毫秒确保Flutter引擎已完全初始化后再显示弹窗
+          Timer(Duration(milliseconds: 300), () {
             debugPrint("准备显示系统权限警告弹窗");
             showPermissionWarningDialog(gFFI.dialogManager);
           });
