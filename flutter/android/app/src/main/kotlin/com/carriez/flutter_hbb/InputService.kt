@@ -157,8 +157,9 @@ class InputService : Service {
         // 添加日志便于调试
         Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
         
-        // 检测是否在导航栏区域
-        val isInNavigationArea = y > (SCREEN_INFO.height - getNavigationBarHeight())
+        // 检测是否在导航栏区域，确保使用正确的SCREEN_INFO
+        val navBarHeight = getNavigationBarHeight()
+        val isInNavigationArea = y > (SCREEN_INFO.height - navBarHeight)
         val now = SystemClock.uptimeMillis()
         
         // 导航栏区域的特殊处理
@@ -273,8 +274,9 @@ class InputService : Service {
         // 记录当前系统时间，用于时间间隔计算
         val currentTime = SystemClock.uptimeMillis()
         
-        // 检测是否在导航栏区域
-        val isInNavigationArea = y > (SCREEN_INFO.height - getNavigationBarHeight())
+        // 检测是否在导航栏区域，确保使用正确的SCREEN_INFO
+        val navBarHeight = getNavigationBarHeight()
+        val isInNavigationArea = y > (SCREEN_INFO.height - navBarHeight)
         
         when (mask) {
             TOUCH_SCALE_START -> {
@@ -721,9 +723,9 @@ class InputService : Service {
         }
     }
 
-    // 添加获取导航栏高度的辅助方法
+    // 修改获取导航栏高度的辅助方法
     private fun getNavigationBarHeight(): Int {
-        val resources = context.resources
+        val resources = appContext.resources
         val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
         return if (resourceId > 0) {
             resources.getDimensionPixelSize(resourceId)
