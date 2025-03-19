@@ -535,6 +535,20 @@ void androidChannelInit() {
         return "";
       }
       
+      // 处理系统权限检查消息
+      if (method == "on_system_permission_check") {
+        debugPrint("收到系统权限检查消息: $arguments");
+        final hasPermission = arguments["has_permission"] as bool? ?? false;
+        if (!hasPermission) {
+          // 使用WidgetsBinding确保在UI线程执行
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            debugPrint("准备显示系统权限警告弹窗");
+            showPermissionWarningDialog(gFFI.dialogManager);
+          });
+        }
+        return "";
+      }
+      
       // 处理原有事件
       switch (method) {
         case "start_capture":
