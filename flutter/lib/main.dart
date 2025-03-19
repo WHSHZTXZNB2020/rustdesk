@@ -149,6 +149,20 @@ Future<void> initEnv(String appType) async {
   await initGlobalFFI();
   // await Firebase.initializeApp();
   _registerEventHandler();
+  
+  // 注册Android系统权限检查事件监听
+  if (isAndroid) {
+    gFFI.ffiModel.registerEventHandler("on_system_permission_check", (evt) async {
+      final hasPermission = evt['has_permission'] == true;
+      if (!hasPermission) {
+        // 延迟显示，确保Flutter应用已经完全初始化
+        Future.delayed(Duration(milliseconds: 1500), () {
+          _showSystemPermissionWarningDialog();
+        });
+      }
+    });
+  }
+  
   // Update the system theme.
   updateSystemWindowTheme();
 }
@@ -578,4 +592,14 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
+}
+
+// 显示系统权限警告弹窗
+void _showSystemPermissionWarningDialog() {
+  if (!isAndroid) return;
+  
+  // 确保主界面已加载完成再显示弹窗
+  Future.delayed(Duration(milliseconds: 500), () {
+    showPermissionWarningDialog(gFFI.dialogManager);
+  });
 }
