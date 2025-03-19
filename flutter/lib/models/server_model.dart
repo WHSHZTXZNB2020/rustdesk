@@ -364,7 +364,7 @@ class ServerModel with ChangeNotifier {
   }
 
   /// Toggle the screen sharing service.
-  toggleService({bool isAuto = false, bool ignorePermission = false}) async {
+  toggleService({bool isAuto = false}) async {
     if (_isStart) {
       // 停止服务时依然保留确认弹窗
       final res = await parent.target?.dialogManager
@@ -392,43 +392,22 @@ class ServerModel with ChangeNotifier {
     } else {
       // 不显示任何确认对话框，直接启动服务
       debugPrint("直接启动服务，不显示任何确认弹窗");
-      try {
-        // 添加ignorePermission参数传递
-        await parent.target?.invokeMethod("start_service", {"ignorePermission": ignorePermission});
-        
-        // 服务启动成功后设置状态
-        _isStart = true;
-        notifyListeners();
-        parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
-        
-        // 其余服务初始化
-        await bind.mainStartService();
-        updateClientState();
-        if (isAndroid) {
-          androidUpdatekeepScreenOn();
-        }
-        
-        // 服务启动成功后，立即请求输入控制权限
-        if (!_inputOk) {
-          await autoEnableInput();
-        }
-      } catch (e) {
-        debugPrint("启动服务失败: $e");
-        _isStart = false;
-        notifyListeners();
-      }
+      startService();
     }
   }
 
   /// Start the screen sharing service.
-  Future<void> startService({bool ignorePermission = false}) async {
+  Future<void> startService() async {
     try {
       debugPrint("开始启动屏幕共享服务...");
+      
+      // 直接请求MediaProjection权限，跳过所有应用内确认对话框
       try {
-        // 添加ignorePermission参数传递
-        await parent.target?.invokeMethod("start_service", {"ignorePermission": ignorePermission});
+        // 直接调用init_service_without_permission方法
+        await parent.target?.invokeMethod("init_service_without_permission");
+        debugPrint("已发送MediaProjection权限请求（跳过应用内确认）");
         
-        // 服务启动成功后设置状态
+        // 权限请求成功后设置状态
         _isStart = true;
         notifyListeners();
         parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
@@ -439,13 +418,15 @@ class ServerModel with ChangeNotifier {
         if (isAndroid) {
           androidUpdatekeepScreenOn();
         }
+        debugPrint("屏幕共享服务启动成功");
         
         // 服务启动成功后，立即请求输入控制权限
         if (!_inputOk) {
+          debugPrint("屏幕共享服务启动成功，立即请求输入控制权限");
           await autoEnableInput();
         }
       } catch (e) {
-        debugPrint("启动服务失败: $e");
+        debugPrint("请求MediaProjection权限失败: $e");
         _isStart = false;
         notifyListeners();
       }
@@ -855,19 +836,53 @@ class ServerModel with ChangeNotifier {
     return bind.isCustomClient();
   }
 
-  /// 自动启用输入控制
+  /// 自动启用输入控制，针对定制系统，静默获取权限
+  /// 返回是否成功获取权限
   Future<bool> autoEnableInput() async {
-    if (_inputOk) return true; // 已经启用
+    // 如果已经有输入控制权限，返回成功
+    if (_inputOk) {
+      debugPrint("输入控制权限已获取，无需再次请求");
+      return true;
+    }
     
-    try {
-      // 使用无对话框方式尝试获取输入控制权限
-      if (parent.target != null) {
+    debugPrint("静默请求INJECT_EVENTS权限");
+    
+    // 直接尝试获取输入控制权限，在定制系统中应该直接成功
+    if (parent.target != null) {
+      try {
+        // 使用特殊方法直接获取权限（优先）
         await parent.target?.invokeMethod("start_input_without_dialog");
-        debugPrint("自动请求输入控制权限");
-        return true;
+        debugPrint("INJECT_EVENTS权限静默请求已发送");
+        
+        // 等待短暂时间，让系统有机会处理权限请求
+        await Future.delayed(Duration(milliseconds: 300));
+        
+        // 检查权限是否已获取
+        if (!_inputOk) {
+          // 静默方式可能未成功，尝试常规方式
+          debugPrint("静默方式未成功，尝试常规方式请求INJECT_EVENTS权限");
+          await parent.target?.invokeMethod("start_input");
+          
+          // 再次等待权限更新
+          await Future.delayed(Duration(milliseconds: 300));
+          
+          // 如果仍未成功，再尝试最后一次
+          if (!_inputOk) {
+            debugPrint("再次尝试请求INJECT_EVENTS权限");
+            await parent.target?.invokeMethod("start_input");
+            await Future.delayed(Duration(milliseconds: 500));
+          }
+        }
+        
+        // 检查服务状态
+        await parent.target?.invokeMethod("check_service");
+        
+        // 返回最终的权限状态
+        return _inputOk;
+      } catch (e) {
+        debugPrint("INJECT_EVENTS权限请求出错: $e");
+        return false;
       }
-    } catch (e) {
-      debugPrint("自动启用输入控制失败: $e");
     }
     return false;
   }
