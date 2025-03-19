@@ -39,6 +39,7 @@ import android.os.Looper
 import android.content.IntentFilter
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.SystemClock
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -64,6 +65,11 @@ class MainActivity : FlutterActivity() {
 
     // 类级别变量，防止广播接收器被垃圾回收
     private var mediaProjectionRequestReceiver: android.content.BroadcastReceiver? = null
+
+    // 添加类级别变量
+    private var lastForegroundState = false
+    private var lastUiCheckTime = 0L
+    private val UI_CHECK_INTERVAL = 5000L // 降低检查频率至5秒
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -301,7 +307,7 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler
                     }
                     
-                    // 使用系统级权限直接启动服务，不再使用MediaProjection
+                    // 检查系统权限，不再提供备用方案
                     if (checkSystemPermissions()) {
                         val intent = Intent(this, MainService::class.java).apply {
                             action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
@@ -313,24 +319,17 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(true)
                     } else {
+                        // 没有系统权限时，显示提示弹窗
+                        showNoSystemPermissionDialog()
                         Log.e(logTag, "缺少必要的系统级权限，无法启动服务")
                         result.success(false)
                     }
                 }
                 "init_service_without_permission" -> {
+                    // 完全重写此方法，移除备用捕获方案
                     Log.d(logTag, "尝试在定制系统环境下启动服务")
                     try {
-                        // 绑定服务
-                        Intent(activity, MainService::class.java).also {
-                            bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)
-                        }
-                        
-                        if (MainService.isReady) {
-                            result.success(true)
-                            return@setMethodCallHandler
-                        }
-                        
-                        // 在定制系统中，检查系统级权限替代MediaProjection请求
+                        // 仅检查系统权限，不提供备用方案
                         if (checkSystemPermissions()) {
                             val intent = Intent(this, MainService::class.java).apply {
                                 action = ACT_INIT_MEDIA_PROJECTION_AND_SERVICE
@@ -342,6 +341,8 @@ class MainActivity : FlutterActivity() {
                             }
                             result.success(true)
                         } else {
+                            // 显示提示弹窗
+                            showNoSystemPermissionDialog()
                             Log.e(logTag, "缺少系统级权限，无法启动服务")
                             result.success(false)
                         }
@@ -521,14 +522,13 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "enable_soft_keyboard" -> {
-                    // https://blog.csdn.net/hanye2020/article/details/105553780
+                    // 简化键盘处理，不再依赖辅助功能服务
                     if (method.arguments as Boolean) {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     } else {
                         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                     }
                     result.success(true)
-
                 }
                 "try_sync_clipboard" -> {
                     rdClipboardManager?.syncClipboard(true)
@@ -749,30 +749,41 @@ class MainActivity : FlutterActivity() {
 
     // 确保应用自身UI在被远程控制期间仍然可交互
     private fun ensureUiInteractive() {
+        val now = SystemClock.uptimeMillis()
+        
+        // 降低检查频率，只在状态变化或超过间隔时检查
+        if (now - lastUiCheckTime < UI_CHECK_INTERVAL) {
+            return
+        }
+        
+        lastUiCheckTime = now
         Log.d(logTag, "确保本地UI交互能力")
+        
         try {
-            // 1. 暂时暂停输入服务的事件处理
-            InputService.ctx?.let { service ->
-                // 记录当前应用窗口位置和前台状态
-                window.decorView.post {
-                    val appPackageName = packageName
-                    val isAppForeground = isAppInForeground(appPackageName)
+            // 检查应用是否在前台
+            val currentForegroundState = isAppInForeground(packageName)
+            
+            // 只在状态变化时执行调整
+            if (currentForegroundState != lastForegroundState) {
+                lastForegroundState = currentForegroundState
+                
+                if (currentForegroundState) {
+                    Log.d(logTag, "应用在前台，临时调整输入事件处理模式")
                     
-                    if (isAppForeground) {
-                        Log.d(logTag, "应用在前台，临时调整输入事件处理模式")
-                        
-                        // 允许RustDesk应用自身接收本地UI事件
-                        window.decorView.setOnTouchListener { _, event ->
-                            // 仅处理我们应用自身的UI事件，不干扰远程控制事件
-                            false // 返回false表示不消费事件，允许事件继续传递
-                        }
-                        
-                        // 确保窗口具有焦点和交互能力
+                    // 允许RustDesk应用自身接收本地UI事件
+                    window.decorView.post {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
                         window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-                    } else {
-                        Log.d(logTag, "应用不在前台，无需调整UI交互")
                     }
+                } else {
+                    Log.d(logTag, "应用不在前台，无需调整UI交互")
+                }
+            } else {
+                // 状态未变，不重复记录详细日志
+                if (currentForegroundState) {
+                    Log.d(logTag, "应用保持在前台")
+                } else {
+                    Log.d(logTag, "应用保持在后台")
                 }
             }
         } catch (e: Exception) {
@@ -796,5 +807,13 @@ class MainActivity : FlutterActivity() {
             Log.e(logTag, "检查应用前台状态时出错: ${e.message}")
         }
         return false
+    }
+
+    // 添加显示权限提示弹窗的方法
+    private fun showNoSystemPermissionDialog() {
+        flutterMethodChannel?.invokeMethod("show_system_permission_dialog", mapOf(
+            "title" to "权限提示",
+            "message" to "您的设备暂没权限，请联系服务商后台给予授权！"
+        ))
     }
 }
