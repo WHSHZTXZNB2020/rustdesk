@@ -12,10 +12,14 @@ import androidx.core.app.ActivityCompat
 import android.os.Build
 import android.util.Log
 import kotlin.concurrent.thread
+import java.util.concurrent.atomic.AtomicBoolean
 
 const val AUDIO_ENCODING = AudioFormat.ENCODING_PCM_FLOAT //  ENCODING_OPUS need API 30
 const val AUDIO_SAMPLE_RATE = 48000
 const val AUDIO_CHANNEL_MASK = AudioFormat.CHANNEL_IN_STEREO
+
+// 添加新的常量
+const val SAMPLE_RATE = 48000
 
 class AudioRecordHandle(private var context: Context, private var isVideoStart: ()->Boolean, private var isAudioStart: ()->Boolean) {
     private val logTag = "LOG_AUDIO_RECORD_HANDLE"
@@ -26,6 +30,11 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
     private var audioRecordStat = false
     private var audioThread: Thread? = null
     private var usesSystemPermissions = false
+    
+    // 添加缺少的变量
+    private var audioRecord: AudioRecord? = null
+    private var audioBufferSize = 0
+    val isRecording = AtomicBoolean(false)
     
     // 系统级权限常量字符串
     companion object {
@@ -52,7 +61,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                 .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                 .build()
 
-            val minBufferSize = 2 * AudioRecord.getMinBufferSize(
+            val minBuffSize = 2 * AudioRecord.getMinBufferSize(
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
@@ -65,7 +74,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                minBufferSize
+                minBuffSize
             )
             
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
@@ -77,8 +86,11 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
             // 创建成功
             Log.d(logTag, "createAudioRecorder success with SYSTEM_LEVEL permission")
             
-            audioBufferSize = minBufferSize
-            audioReader = AudioReader(minBufferSize, 16)
+            // 同时设置旧变量和新变量以保持兼容性
+            this.audioBufferSize = minBuffSize
+            this.minBufferSize = minBuffSize
+            this.audioRecorder = audioRecord
+            this.audioReader = AudioReader(minBuffSize, 16)
             return true
         } catch (e: Exception) {
             Log.e(logTag, "createAudioRecorder error: ${e.message}")
@@ -114,6 +126,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                 FFI.setFrameRawEnable("audio", true)
                 audioRecorder!!.startRecording()
                 audioRecordStat = true
+                isRecording.set(true)
                 audioThread = thread {
                     while (audioRecordStat) {
                         audioReader!!.readSync(audioRecorder!!)?.let {
@@ -123,7 +136,9 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                     // let's release here rather than onDestroy to avoid threading issue
                     audioRecorder?.release()
                     audioRecorder = null
+                    audioRecord = null
                     minBufferSize = 0
+                    isRecording.set(false)
                     FFI.setFrameRawEnable("audio", false)
                     Log.d(logTag, "Exit audio thread")
                 }
@@ -200,6 +215,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
             return
         }
         audioRecordStat = false
+        isRecording.set(false)
         audioThread?.join()
         audioThread = null
     }
@@ -208,6 +224,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
         Log.d(logTag, "destroy audio record handle")
 
         audioRecordStat = false
+        isRecording.set(false)
         audioThread?.join()
     }
     
