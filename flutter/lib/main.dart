@@ -579,3 +579,38 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
     },
   );
 }
+
+// 在androidChannelInit方法中添加处理系统权限对话框的逻辑
+void androidChannelInit() {
+  // 现有的代码保持不变
+  const MethodChannel methodChannel = MethodChannel('mChannel');
+  
+  methodChannel.setMethodCallHandler((call) async {
+    switch (call.method) {
+      case 'show_system_permission_dialog':
+        final Map args = call.arguments;
+        await showDialog(
+          context: globalKey.currentContext!,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text(args['title']),
+              content: Text(args['message']),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('确定'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+        break;
+      // 其他已有方法处理保持不变
+      // ... existing code ...
+    }
+    return null;
+  });
+}
