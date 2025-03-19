@@ -152,7 +152,7 @@ Future<void> initEnv(String appType) async {
   
   // 注册Android系统权限检查事件监听
   if (isAndroid) {
-    gFFI.ffiModel.registerEventHandler("on_system_permission_check", (evt) async {
+    platformFFI.registerEventHandler("on_system_permission_check", "permission_check", (evt) async {
       final hasPermission = evt['has_permission'] == true;
       if (!hasPermission) {
         // 延迟显示，确保Flutter应用已经完全初始化
