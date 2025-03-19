@@ -1528,6 +1528,40 @@ String translate(String name) {
   return platformFFI.translate(name, localeName);
 }
 
+/// 显示系统权限警告弹窗
+void showPermissionWarningDialog(OverlayDialogManager dialogManager) {
+  dialogManager.dismissAll();
+  dialogManager.show((setState, close, context) {
+    return CustomAlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red),
+          SizedBox(width: 10),
+          Text(translate('请授权')),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            translate('此设备无权限，请联系服务商授权！'),
+            style: const TextStyle(fontSize: 16),
+          ),
+        ],
+      ),
+      actions: [
+        dialogButton(
+          '确定',
+          onPressed: close,
+        ),
+      ],
+      onSubmit: close,
+      onCancel: close,
+    );
+  });
+}
+
 // This function must be kept the same as the one in rust and sciter code.
 // rust: libs/hbb_common/src/config.rs -> option2bool()
 // sciter: Does not have the function, but it should be kept the same.
