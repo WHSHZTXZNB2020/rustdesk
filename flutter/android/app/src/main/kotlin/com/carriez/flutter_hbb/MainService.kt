@@ -498,36 +498,35 @@ class MainService : Service() {
         }
 
         // 根据权限选择不同的屏幕捕获方式
-        try {
-            val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
-            if (hasSurfaceFlingerPermission) {
-                Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限创建虚拟显示")
+        if (hasSurfaceFlingerPermission) {
+            Log.d(logTag, "使用 ACCESS_SURFACE_FLINGER 权限进行屏幕捕获")
+            if (useVP9) {
+                startVP9VideoRecorderWithSurfaceFlinger()
             } else {
-                Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限创建虚拟显示")
+                startRawVideoRecorderWithSurfaceFlinger()
             }
-            
-            virtualDisplay = displayManager?.createVirtualDisplay(
-                "RustDesk-FrameBuffer-Display",
-                SCREEN_INFO.width,
-                SCREEN_INFO.height,
-                SCREEN_INFO.dpi,
-                surface,
-                flags,
-                null,
-                null
-            )
-            
-            if (virtualDisplay == null) {
-                Log.e(logTag, "创建虚拟显示失败")
-                return false
+        } else {
+            Log.d(logTag, "使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限进行屏幕捕获")
+            if (useVP9) {
+                startVP9VideoRecorderWithSystemPermissions()
+            } else {
+                startRawVideoRecorderWithSystemPermissions()
             }
-        } catch (e: Exception) {
-            Log.e(logTag, "创建虚拟显示异常: ${e.message}")
-            return false
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!audioRecordHandle.createAudioRecorder(false, null)) {
+                Log.d(logTag, "createAudioRecorder fail")
+            } else {
+                Log.d(logTag, "audio recorder start")
+                audioRecordHandle.startAudioRecorder()
+            }
         }
         
+        _isReady = true
         _isStart = true
-        Log.d(logTag, "Start Capture Done")
+        FFI.setFrameRawEnable("video", true)
+        MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
         return true
     }
     
@@ -774,7 +773,59 @@ class MainService : Service() {
         // 什么都不做，因为我们使用系统级权限
     }
 
-    // 添加使用系统权限的视频录制方法
+    // 使用 SurfaceFlinger 实现屏幕捕获
+    private fun startRawVideoRecorderWithSurfaceFlinger() {
+        try {
+            if (surface == null) {
+                Log.e(logTag, "startRawVideoRecorderWithSurfaceFlinger: surface is null")
+                return
+            }
+            
+            // 使用 SurfaceFlinger 进行屏幕捕获
+            Log.d(logTag, "使用 SurfaceFlinger 创建虚拟显示")
+            
+            // 创建虚拟显示
+            virtualDisplay = createVirtualDisplayWithSurfaceFlinger(surface!!)
+            
+            // 日志记录
+            if (virtualDisplay != null) {
+                Log.d(logTag, "成功创建基于 SurfaceFlinger 的虚拟显示")
+            } else {
+                Log.e(logTag, "创建基于 SurfaceFlinger 的虚拟显示失败")
+            }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error starting raw video recorder with SurfaceFlinger: ${e.message}")
+        }
+    }
+    
+    private fun startVP9VideoRecorderWithSurfaceFlinger() {
+        // VP9编码器的 SurfaceFlinger 实现
+        // 由于目前没有完全实现，先使用Raw实现
+        Log.d(logTag, "startVP9VideoRecorderWithSurfaceFlinger not fully implemented, using raw implementation")
+        startRawVideoRecorderWithSurfaceFlinger()
+    }
+    
+    // 创建使用 SurfaceFlinger 的虚拟显示
+    private fun createVirtualDisplayWithSurfaceFlinger(surface: Surface): VirtualDisplay? {
+        try {
+            // 使用 ACCESS_SURFACE_FLINGER 权限创建虚拟显示
+            return displayManager?.createVirtualDisplay(
+                "RustDesk-SurfaceFlinger-Display",
+                SCREEN_INFO.width,
+                SCREEN_INFO.height,
+                SCREEN_INFO.dpi,
+                surface,
+                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                null,
+                null
+            )
+        } catch (e: Exception) {
+            Log.e(logTag, "Error creating virtual display with SurfaceFlinger: ${e.message}")
+            return null
+        }
+    }
+    
+    // 使用其他系统权限实现屏幕捕获
     private fun startRawVideoRecorderWithSystemPermissions() {
         try {
             if (surface == null) {
@@ -782,12 +833,13 @@ class MainService : Service() {
                 return
             }
             
-            // 使用系统权限从Display直接读取帧缓冲
-            if (display != null) {
-                Log.d(logTag, "Creating virtual display with system permissions")
-                virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            // 使用系统权限创建虚拟显示
+            virtualDisplay = createVirtualDisplayWithSystemPermissions(surface!!)
+            
+            if (virtualDisplay != null) {
+                Log.d(logTag, "成功创建基于系统权限的虚拟显示")
             } else {
-                Log.e(logTag, "Display is null, cannot create virtual display")
+                Log.e(logTag, "创建基于系统权限的虚拟显示失败")
             }
         } catch (e: Exception) {
             Log.e(logTag, "Error starting raw video recorder with system permissions: ${e.message}")
@@ -795,25 +847,30 @@ class MainService : Service() {
     }
     
     private fun startVP9VideoRecorderWithSystemPermissions() {
-        // 实现VP9编码器的系统权限版本
-        // 这部分代码与原VP9实现类似，但使用系统权限
-        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not implemented yet")
+        // VP9编码器的系统权限实现
+        // 由于目前没有完全实现，先使用Raw实现
+        Log.d(logTag, "startVP9VideoRecorderWithSystemPermissions not fully implemented, using raw implementation")
+        startRawVideoRecorderWithSystemPermissions()
     }
     
     // 创建使用系统权限的虚拟显示
     private fun createVirtualDisplayWithSystemPermissions(surface: Surface): VirtualDisplay? {
         try {
-            // 使用系统权限从屏幕直接读取内容
+            // 使用 CAPTURE_VIDEO_OUTPUT 和 READ_FRAME_BUFFER 权限创建虚拟显示
+            // 特别针对这些权限优化参数
+            val flags = VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
             return displayManager?.createVirtualDisplay(
-                "RustDesk-Display",
+                "RustDesk-SystemPermission-Display",
                 SCREEN_INFO.width,
                 SCREEN_INFO.height,
                 SCREEN_INFO.dpi,
                 surface,
-                VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                flags,
+                null,
+                null
             )
         } catch (e: Exception) {
-            Log.e(logTag, "Error creating virtual display: ${e.message}")
+            Log.e(logTag, "Error creating virtual display with system permissions: ${e.message}")
             return null
         }
     }
