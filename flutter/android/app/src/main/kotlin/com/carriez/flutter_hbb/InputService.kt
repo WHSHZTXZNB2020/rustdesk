@@ -105,6 +105,10 @@ class InputService : Service {
     // 事件处理状态
     private var lastDownTime = 0L   // 上次DOWN事件的时间戳
     
+    // 在类成员变量区域添加
+    private var lastNavbarActionTime = 0L
+    private val NAVBAR_DEBOUNCE_TIME = 500L // 导航栏区域使用更长的防抖时间
+
     // 提供公开的无参构造函数
     constructor() : super() {
         Log.d(logTag, "InputService created with default constructor")
@@ -150,71 +154,68 @@ class InputService : Service {
         val x = max(0, _x)
         val y = max(0, _y)
 
-        // 添加事件日志，便于调试
+        // 添加日志便于调试
         Log.d(logTag, "接收到鼠标输入事件: mask=$mask, x=$x, y=$y")
+        
+        // 检测是否在导航栏区域
+        val isInNavigationArea = y > (SCREEN_INFO.height - getNavigationBarHeight())
+        val now = SystemClock.uptimeMillis()
+        
+        // 导航栏区域的特殊处理
+        if (isInNavigationArea && (mask == LEFT_DOWN || mask == 9)) {
+            // 导航栏区域使用更严格的防抖
+            if (now - lastNavbarActionTime < NAVBAR_DEBOUNCE_TIME) {
+                Log.d(logTag, "跳过导航栏区域重复事件: ($x, $y) 时间间隔: ${now - lastNavbarActionTime}ms")
+                return
+            }
+            lastNavbarActionTime = now
+        }
 
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
             mouseX = x * SCREEN_INFO.scale
             mouseY = y * SCREEN_INFO.scale
-            if (isWaitingLongPress) {
-                val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
-                if (delta > 8) {
-                    isWaitingLongPress = false
-                }
+            
+            // 保留delta检测，但不再用于长按检测
+            if (abs(oldX - mouseX) + abs(oldY - mouseY) > 0) {
+                Log.d(logTag, "delta:${abs(oldX - mouseX) + abs(oldY - mouseY)}")
             }
             
-            // Move mouse pointer
+            // 移动鼠标指针
             injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
         }
 
-        // left button down, was up
+        // 左键按下处理，无长按逻辑
         if (mask == LEFT_DOWN) {
             // 防止短时间内重复触发DOWN事件
             if (lastActionType == MotionEvent.ACTION_DOWN && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
+                (now - lastEventTime) < 200) {  // 增加到200ms
                 Log.d(logTag, "跳过重复的LEFT_DOWN事件")
                 return
             }
             
-            isWaitingLongPress = true
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    if (isWaitingLongPress) {
-                        isWaitingLongPress = false
-                        // Long press
-                        injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat(), true)
-                    }
-                }
-            }, longPressDuration)
-
+            // 移除原有的长按检测逻辑
             leftIsDown = true
-            // Touch down
             injectMotionEvent(MotionEvent.ACTION_DOWN, mouseX.toFloat(), mouseY.toFloat())
             return
         }
 
-        // left down, was down
+        // 左键仍然按下
         if (leftIsDown) {
-            // Continue touch/drag
             injectMotionEvent(MotionEvent.ACTION_MOVE, mouseX.toFloat(), mouseY.toFloat())
         }
 
-        // left up, was down
+        // 左键释放
         if (mask == LEFT_UP) {
-            // 防止短时间内重复触发UP事件
             if (lastActionType == MotionEvent.ACTION_UP && 
-                (SystemClock.uptimeMillis() - lastEventTime) < 100) {
+                (now - lastEventTime) < 200) {  // 增加到200ms
                 Log.d(logTag, "跳过重复的LEFT_UP事件")
                 return
             }
             
             if (leftIsDown) {
                 leftIsDown = false
-                isWaitingLongPress = false
-                // Touch up
                 injectMotionEvent(MotionEvent.ACTION_UP, mouseX.toFloat(), mouseY.toFloat())
                 return
             }
@@ -271,6 +272,9 @@ class InputService : Service {
         
         // 记录当前系统时间，用于时间间隔计算
         val currentTime = SystemClock.uptimeMillis()
+        
+        // 检测是否在导航栏区域
+        val isInNavigationArea = y > (SCREEN_INFO.height - getNavigationBarHeight())
         
         when (mask) {
             TOUCH_SCALE_START -> {
@@ -334,6 +338,15 @@ class InputService : Service {
                     (currentTime - lastEventTime) < 200) {
                     Log.d(logTag, "跳过重复的TOUCH_PAN_START事件，距上次: ${currentTime - lastEventTime}ms")
                     return
+                }
+                
+                // 导航栏区域的特殊处理
+                if (isInNavigationArea) {
+                    if (currentTime - lastNavbarActionTime < NAVBAR_DEBOUNCE_TIME) {
+                        Log.d(logTag, "跳过导航栏区域重复触摸事件: ($x, $y) 时间间隔: ${currentTime - lastNavbarActionTime}ms")
+                        return
+                    }
+                    lastNavbarActionTime = currentTime
                 }
                 
                 // 添加调试日志
@@ -472,16 +485,16 @@ class InputService : Service {
             // 检查事件防重复（相同类型的事件在短时间内只处理一次）
             val now = SystemClock.uptimeMillis()
             
-            // 对于ACTION_DOWN和ACTION_UP做更严格的检查，因为这些可能导致重复点击问题
+            // 对于ACTION_DOWN和ACTION_UP做更严格的检查
             if (!isLongPress && 
                 (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) && 
                 action == lastActionType && 
-                (now - lastEventTime) < 250) {
+                (now - lastEventTime) < 250) { // 从100ms增加到250ms
                 Log.d(logTag, "跳过重复的动作事件: $actionName, 距上次: ${now - lastEventTime}ms")
                 return true
             }
             
-            // 对于MOVE事件，我们允许更频繁的注入，但仍然防止过于频繁
+            // 对于MOVE事件，允许更频繁的注入，但仍然防止过于频繁
             if (action == MotionEvent.ACTION_MOVE && 
                 action == lastActionType && 
                 (now - lastEventTime) < 16) { // 约60fps
@@ -705,6 +718,18 @@ class InputService : Service {
             ctx = null
         } catch (e: Exception) {
             Log.e(logTag, "Error in disableSelf: ${e.message}")
+        }
+    }
+
+    // 添加获取导航栏高度的辅助方法
+    private fun getNavigationBarHeight(): Int {
+        val resources = context.resources
+        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (resourceId > 0) {
+            resources.getDimensionPixelSize(resourceId)
+        } else {
+            // 默认值，大多数设备导航栏在48dp左右
+            (48 * resources.displayMetrics.density).toInt()
         }
     }
 }
