@@ -153,12 +153,11 @@ Future<void> initEnv(String appType) async {
   // 注册Android系统权限检查事件监听
   if (isAndroid) {
     platformFFI.registerEventHandler("on_system_permission_check", "permission_check", (evt) async {
+      debugPrint("收到权限检查事件: $evt");
       final hasPermission = evt['has_permission'] == true;
       if (!hasPermission) {
-        // 延迟显示，确保Flutter应用已经完全初始化
-        Future.delayed(Duration(milliseconds: 1500), () {
-          _showSystemPermissionWarningDialog();
-        });
+        // 直接显示弹窗，不使用延迟
+        _showSystemPermissionWarningDialog();
       }
     });
   }
@@ -598,8 +597,10 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
 void _showSystemPermissionWarningDialog() {
   if (!isAndroid) return;
   
-  // 确保主界面已加载完成再显示弹窗
-  Future.delayed(Duration(milliseconds: 500), () {
+  debugPrint("准备显示权限警告弹窗");
+  // 确保在UI线程且帧渲染后显示弹窗
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    debugPrint("开始调用showPermissionWarningDialog");
     showPermissionWarningDialog(gFFI.dialogManager);
   });
 }
