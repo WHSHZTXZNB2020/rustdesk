@@ -112,40 +112,48 @@ class MainActivity : FlutterActivity() {
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
         
-        // 检查系统权限状态
-        val hasSystemPermissions = checkSystemPermissions()
-        
-        // 如果没有系统权限，通过Flutter通道告知Flutter层
-        if (!hasSystemPermissions) {
-            Log.e(logTag, "缺少必要的系统权限，无法进行远程控制")
-            // 延迟发送，确保Flutter引擎已初始化
-            Handler(Looper.getMainLooper()).postDelayed({
+        // 延迟检查权限，确保Flutter引擎完全初始化
+        Handler(Looper.getMainLooper()).postDelayed({
+            // 检查系统权限状态
+            val hasSystemPermissions = checkSystemPermissions()
+            
+            // 如果没有系统权限，通过Flutter通道告知Flutter层
+            if (!hasSystemPermissions) {
+                Log.e(logTag, "缺少必要的系统权限，无法进行远程控制，即将发送通知到Flutter层")
                 flutterMethodChannel?.invokeMethod(
                     "on_system_permission_check",
                     mapOf("has_permission" to false)
                 )
-            }, 1000)
-        } else {
-            Log.d(logTag, "系统级权限已预授权")
-            
-            // 检查是否有ACCESS_SURFACE_FLINGER权限
-            val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
-            val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
-            
-            if (hasSurfaceFlingerPermission) {
-                try {
-                    ToastUtils.showReadyToast(this)
-                } catch (e: Exception) {
-                    val toast = android.widget.Toast.makeText(
-                        this,
-                        "已就绪",
-                        android.widget.Toast.LENGTH_SHORT
+                // 再次尝试发送，确保消息被接收
+                Handler(Looper.getMainLooper()).postDelayed({
+                    Log.e(logTag, "再次尝试发送权限检查消息到Flutter层")
+                    flutterMethodChannel?.invokeMethod(
+                        "on_system_permission_check",
+                        mapOf("has_permission" to false)
                     )
-                    toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
-                    toast.show()
+                }, 2000)
+            } else {
+                Log.d(logTag, "系统级权限已预授权")
+                
+                // 检查是否有ACCESS_SURFACE_FLINGER权限
+                val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+                val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+                
+                if (hasSurfaceFlingerPermission) {
+                    try {
+                        ToastUtils.showReadyToast(this)
+                    } catch (e: Exception) {
+                        val toast = android.widget.Toast.makeText(
+                            this,
+                            "已就绪",
+                            android.widget.Toast.LENGTH_SHORT
+                        )
+                        toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+                        toast.show()
+                    }
                 }
             }
-        }
+        }, 3000) // 延迟3秒执行，确保Flutter已完全初始化
         
         flutterMethodChannel?.invokeMethod(
             "on_state_changed",
