@@ -252,7 +252,7 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         
-                        // 有权限，才直接使用系统权限启动服务
+                        // 有权限或强制启动模式，直接启动服务
                         val intent = Intent(context, MainService::class.java)
                         intent.action = ACT_INIT_SERVICE
                         
