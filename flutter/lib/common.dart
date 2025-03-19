@@ -1530,14 +1530,16 @@ String translate(String name) {
 
 /// 显示系统权限警告弹窗
 void showPermissionWarningDialog(OverlayDialogManager dialogManager) {
+  debugPrint("开始显示权限警告弹窗");
   dialogManager.dismissAll();
   dialogManager.show((setState, close, context) {
+    debugPrint("权限警告弹窗已创建");
     return CustomAlertDialog(
       title: Row(
         children: [
           Icon(Icons.warning_amber_rounded, color: Colors.red),
           SizedBox(width: 10),
-          Text(translate('请授权')),
+          Text(translate('权限不足')),
         ],
       ),
       content: Column(
@@ -1560,6 +1562,7 @@ void showPermissionWarningDialog(OverlayDialogManager dialogManager) {
       onCancel: close,
     );
   });
+  debugPrint("权限警告弹窗显示函数执行完毕");
 }
 
 // This function must be kept the same as the one in rust and sciter code.
