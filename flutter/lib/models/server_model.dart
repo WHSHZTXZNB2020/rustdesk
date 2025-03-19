@@ -364,7 +364,7 @@ class ServerModel with ChangeNotifier {
   }
 
   /// Toggle the screen sharing service.
-  toggleService({bool isAuto = false}) async {
+  toggleService({bool isAuto = false, bool ignorePermission = false}) async {
     if (_isStart) {
       // 停止服务时依然保留确认弹窗
       final res = await parent.target?.dialogManager
@@ -392,22 +392,49 @@ class ServerModel with ChangeNotifier {
     } else {
       // 不显示任何确认对话框，直接启动服务
       debugPrint("直接启动服务，不显示任何确认弹窗");
-      startService();
+      
+      // 忽略权限检查模式
+      if (ignorePermission) {
+        debugPrint("强制启动模式，跳过权限检查");
+        // 尝试直接使用start_service方法启动，不检查权限
+        try {
+          await parent.target?.invokeMethod("start_service");
+          _isStart = true;
+          notifyListeners();
+          parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
+          await bind.mainStartService();
+          updateClientState();
+          if (isAndroid) {
+            androidUpdatekeepScreenOn();
+          }
+          // 尝试启用输入
+          if (!_inputOk) {
+            autoEnableInput();
+          }
+        } catch (e) {
+          debugPrint("强制启动服务失败: $e");
+          _isStart = false;
+          notifyListeners();
+        }
+      } else {
+        // 正常启动流程
+        startService(ignorePermission: ignorePermission);
+      }
     }
   }
 
   /// Start the screen sharing service.
-  Future<void> startService() async {
+  Future<void> startService({bool ignorePermission = false}) async {
     try {
       debugPrint("开始启动屏幕共享服务...");
       
       // 直接请求MediaProjection权限，跳过所有应用内确认对话框
       try {
-        // 直接调用init_service_without_permission方法
-        await parent.target?.invokeMethod("init_service_without_permission");
-        debugPrint("已发送MediaProjection权限请求（跳过应用内确认）");
+        // 直接调用start_service方法
+        await parent.target?.invokeMethod("start_service", {"ignorePermission": ignorePermission});
+        debugPrint("已发送service启动请求");
         
-        // 权限请求成功后设置状态
+        // 服务启动成功后设置状态
         _isStart = true;
         notifyListeners();
         parent.target?.ffiModel.updateEventListener(parent.target!.sessionId, "");
@@ -426,7 +453,7 @@ class ServerModel with ChangeNotifier {
           await autoEnableInput();
         }
       } catch (e) {
-        debugPrint("请求MediaProjection权限失败: $e");
+        debugPrint("启动服务失败: $e");
         _isStart = false;
         notifyListeners();
       }
