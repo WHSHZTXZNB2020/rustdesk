@@ -137,8 +137,8 @@ class ServiceNotRunningNotification extends StatelessWidget {
             ElevatedButton.icon(
                 icon: const Icon(Icons.play_arrow),
                 onPressed: () {
-                  // 直接启动服务，不显示警告弹窗
-                  serverModel.toggleService();
+                  // 直接启动服务，强制启动模式，忽略权限检查
+                  serverModel.toggleService(ignorePermission: true);
                 },
                 label: Text(translate("开始协助")))
           ],
@@ -376,6 +376,7 @@ class _ServerInfoState extends State<ServerInfo> {
         // 本地没有保存SN，需要重新获取
         _requestDeviceSN();
       }
+
     } catch (e) {
       debugPrint("读取本地SN失败: $e");
       _requestDeviceSN(); // 出错时尝试重新获取
@@ -525,6 +526,31 @@ void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
     debugPrint("flutter got android msg: $method, $arguments");
     try {
+      // 处理权限错误
+      if (method == "on_permission_error" && arguments is Map) {
+        final message = arguments["message"] as String?;
+        debugPrint("收到权限错误: '$message'");
+        
+        // 显示权限错误对话框
+        showDialog(
+          context: globalKey.currentContext!,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Text(translate('权限不足')),
+            content: Text(translate('你的设备无权限，请联系你的服务商后台给予授权。')),
+            actions: [
+              TextButton(
+                child: Text(translate('确定')),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          ),
+        );
+        return "";
+      }
+      
       // 处理SN接收
       if (method == "on_sn_received" && arguments is Map) {
         final sn = arguments["sn"] as String?;
