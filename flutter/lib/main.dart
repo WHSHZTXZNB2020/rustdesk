@@ -150,19 +150,7 @@ Future<void> initEnv(String appType) async {
   // await Firebase.initializeApp();
   _registerEventHandler();
   
-  // 注册Android系统权限检查事件监听
-  if (isAndroid) {
-    platformFFI.registerEventHandler("on_system_permission_check", "permission_check", (evt) async {
-      debugPrint("收到权限检查事件: $evt");
-      final hasPermission = evt['has_permission'] == true;
-      if (!hasPermission) {
-        // 直接显示弹窗，不使用延迟
-        _showSystemPermissionWarningDialog();
-      }
-    });
-  }
-  
-  // Update the system theme.
+  // 更新系统主题
   updateSystemWindowTheme();
 }
 
@@ -591,16 +579,4 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
-}
-
-// 显示系统权限警告弹窗
-void _showSystemPermissionWarningDialog() {
-  if (!isAndroid) return;
-  
-  debugPrint("准备显示权限警告弹窗");
-  // 确保在UI线程且帧渲染后显示弹窗
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    debugPrint("开始调用showPermissionWarningDialog");
-    showPermissionWarningDialog(gFFI.dialogManager);
-  });
 }
