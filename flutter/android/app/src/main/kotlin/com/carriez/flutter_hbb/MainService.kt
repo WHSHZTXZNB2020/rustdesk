@@ -526,7 +526,7 @@ class MainService : Service() {
             return false
         }
         
-        isStart = true
+        _isStart = true
         Log.d(logTag, "Start Capture Done")
         return true
     }
