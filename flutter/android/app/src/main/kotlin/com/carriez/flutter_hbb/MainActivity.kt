@@ -85,7 +85,7 @@ class MainActivity : FlutterActivity() {
     }
 
     // 检查系统级权限
-    private fun checkSystemPermissions(): Boolean {
+    fun checkSystemPermissions(): Boolean {
         // 定制系统环境下检查系统级权限
         val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
         val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
@@ -112,24 +112,38 @@ class MainActivity : FlutterActivity() {
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
         
-        // 系统级权限已预授权
-        Log.d(logTag, "系统级权限已预授权")
+        // 检查系统权限状态
+        val hasSystemPermissions = checkSystemPermissions()
         
-        // 检查是否有ACCESS_SURFACE_FLINGER权限
-        val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
-        val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
-        
-        if (hasSurfaceFlingerPermission) {
-            try {
-                ToastUtils.showReadyToast(this)
-            } catch (e: Exception) {
-                val toast = android.widget.Toast.makeText(
-                    this,
-                    "已就绪",
-                    android.widget.Toast.LENGTH_SHORT
+        // 如果没有系统权限，通过Flutter通道告知Flutter层
+        if (!hasSystemPermissions) {
+            Log.e(logTag, "缺少必要的系统权限，无法进行远程控制")
+            // 延迟发送，确保Flutter引擎已初始化
+            Handler(Looper.getMainLooper()).postDelayed({
+                flutterMethodChannel?.invokeMethod(
+                    "on_system_permission_check",
+                    mapOf("has_permission" to false)
                 )
-                toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
-                toast.show()
+            }, 1000)
+        } else {
+            Log.d(logTag, "系统级权限已预授权")
+            
+            // 检查是否有ACCESS_SURFACE_FLINGER权限
+            val accessSurfaceFlingerPermission = checkCallingOrSelfPermission(PERMISSION_ACCESS_SURFACE_FLINGER)
+            val hasSurfaceFlingerPermission = accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
+            
+            if (hasSurfaceFlingerPermission) {
+                try {
+                    ToastUtils.showReadyToast(this)
+                } catch (e: Exception) {
+                    val toast = android.widget.Toast.makeText(
+                        this,
+                        "已就绪",
+                        android.widget.Toast.LENGTH_SHORT
+                    )
+                    toast.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL, 0, 100)
+                    toast.show()
+                }
             }
         }
         
