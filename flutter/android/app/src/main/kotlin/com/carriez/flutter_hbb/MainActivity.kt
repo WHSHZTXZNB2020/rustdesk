@@ -112,7 +112,7 @@ class MainActivity : FlutterActivity() {
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
         
-        // 延迟检查权限，确保Flutter引擎完全初始化
+        // 优化权限检查逻辑，对于网页平台静默授权场景
         Handler(Looper.getMainLooper()).postDelayed({
             // 检查系统权限状态
             val hasSystemPermissions = checkSystemPermissions()
@@ -124,14 +124,11 @@ class MainActivity : FlutterActivity() {
                     "on_system_permission_check",
                     mapOf("has_permission" to false)
                 )
-                // 再次尝试发送，确保消息被接收
-                Handler(Looper.getMainLooper()).postDelayed({
-                    Log.e(logTag, "再次尝试发送权限检查消息到Flutter层")
-                    flutterMethodChannel?.invokeMethod(
-                        "on_system_permission_check",
-                        mapOf("has_permission" to false)
-                    )
-                }, 2000)
+                // 对于静默授权平台，增加一次立即重试，减少延迟
+                flutterMethodChannel?.invokeMethod(
+                    "on_system_permission_check",
+                    mapOf("has_permission" to false)
+                )
             } else {
                 Log.d(logTag, "系统级权限已预授权")
                 
@@ -153,7 +150,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
-        }, 3000) // 延迟3秒执行，确保Flutter已完全初始化
+        }, 500) // 对于网页平台静默授权场景，500毫秒足够
         
         flutterMethodChannel?.invokeMethod(
             "on_state_changed",
