@@ -59,9 +59,15 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                                    readFrameBufferPermission == PackageManager.PERMISSION_GRANTED ||
                                    accessSurfaceFlingerPermission == PackageManager.PERMISSION_GRANTED
             
+            // 如果没有系统权限，直接返回失败，不尝试备用方式
+            if (!usesSystemPermissions) {
+                Log.d(logTag, "没有系统级权限，无法进行音频捕获")
+                return false
+            }
+            
             Log.d(logTag, "创建音频录制器，系统权限: $usesSystemPermissions, 媒体投影可用: ${mediaProjection != null}")
             
-            // 创建音频格式 - 定制系统应该支持高质量设置
+            // 创建音频格式
             val audioFormat = try {
                 AudioFormat.Builder()
                     .setEncoding(AUDIO_ENCODING)
@@ -95,24 +101,11 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                 return false
             }
             
-            // 系统级权限下应优先使用REMOTE_SUBMIX，为定制系统优化
+            // 确定音频源
             val audioSource = when {
                 inVoiceCall -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                usesSystemPermissions -> {
-                    // 系统权限下，不同设备可能支持不同音频源
-                    try {
-                        MediaRecorder.AudioSource.REMOTE_SUBMIX
-                    } catch (e: Exception) {
-                        // 如果REMOTE_SUBMIX不支持，回退到其他音频源
-                        try {
-                            // 删除SYSTEM音频源的引用，使用MIC替代
-                            MediaRecorder.AudioSource.MIC
-                        } catch (e2: Exception) {
-                            MediaRecorder.AudioSource.DEFAULT
-                        }
-                    }
-                }
-                mediaProjection != null -> null  // MediaProjection方式不需要设置音频源
+                // 系统权限下使用REMOTE_SUBMIX
+                usesSystemPermissions -> MediaRecorder.AudioSource.REMOTE_SUBMIX
                 else -> {
                     Log.d(logTag, "没有可用的音频捕获方式")
                     return false
@@ -126,30 +119,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
                 val builder = AudioRecord.Builder()
                     .setAudioFormat(audioFormat)
                     .setBufferSizeInBytes(bufferSizeInBytes)
-                
-                // 根据不同情况设置音频源或播放捕获配置
-                if (inVoiceCall || usesSystemPermissions) {
-                    builder.setAudioSource(audioSource!!)
-                } else if (mediaProjection != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // 使用MediaProjection时的设置
-                    try {
-                        // 为定制系统配置全面捕获所有音频类型
-                        val apcc = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
-                            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                            .addMatchingUsage(AudioAttributes.USAGE_ALARM)
-                            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANT)
-                            .addMatchingUsage(AudioAttributes.USAGE_NOTIFICATION)
-                            .addMatchingUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                            .build()
-                        
-                        builder.setAudioPlaybackCaptureConfig(apcc)
-                    } catch (e: Exception) {
-                        Log.e(logTag, "设置音频播放捕获配置失败: ${e.message}")
-                        return false
-                    }
-                }
+                    .setAudioSource(audioSource)
                 
                 // 创建音频录制器
                 try {
