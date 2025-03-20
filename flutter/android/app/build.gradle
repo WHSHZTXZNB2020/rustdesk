@@ -76,6 +76,11 @@ android {
         targetSdkVersion 33
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        
+        // 只构建arm64-v8a和armeabi-v7a架构
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
     }
 
     signingConfigs {
@@ -93,6 +98,23 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'
+        }
+    }
+    
+    // 添加splits配置，确保只分包这两种架构
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk true // 生成通用APK
+        }
+    }
+
+    // 禁用x86和x86_64架构的打包
+    packagingOptions {
+        jniLibs {
+            excludes += ['**/x86/**.so', '**/x86_64/**.so']
         }
     }
 }
