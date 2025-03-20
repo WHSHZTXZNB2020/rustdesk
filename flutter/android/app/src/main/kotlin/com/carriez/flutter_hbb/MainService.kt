@@ -324,12 +324,35 @@ class MainService : Service() {
         }
         Log.d(logTag,"updateScreenInfo:w:$w,h:$h")
         var scale = 1
+        
+        // 定义额外的分辨率阈值
+        val MIN_SCALE_THRESHOLD = 1200
+        
         if (w != 0 && h != 0) {
-            if (isHalfScale == true && (w > MAX_SCREEN_SIZE || h > MAX_SCREEN_SIZE)) {
-                scale = 2
-                w /= scale
-                h /= scale
-                dpi /= scale
+            if (isHalfScale == true) {
+                // 最大边超过1400，缩小一半
+                if (w > MAX_SCREEN_SIZE || h > MAX_SCREEN_SIZE) {
+                    Log.d(logTag, "应用1/2缩放: 最大边超过${MAX_SCREEN_SIZE}像素")
+                    scale = 2
+                    w /= scale
+                    h /= scale
+                    dpi /= scale
+                } 
+                // 最大边在1200-1400之间，缩小三分之一
+                else if ((w > MIN_SCALE_THRESHOLD || h > MIN_SCALE_THRESHOLD) && 
+                         (w <= MAX_SCREEN_SIZE && h <= MAX_SCREEN_SIZE)) {
+                    Log.d(logTag, "应用2/3缩放: 最大边在${MIN_SCALE_THRESHOLD}-${MAX_SCREEN_SIZE}像素之间")
+                    scale = 3
+                    w = w * 2 / scale
+                    h = h * 2 / scale
+                    dpi = dpi * 2 / scale
+                }
+                // 1200以下不缩放
+                else {
+                    Log.d(logTag, "不应用缩放: 最大边小于${MIN_SCALE_THRESHOLD}像素")
+                    scale = 1
+                    // 不需要调整尺寸
+                }
             }
             if (SCREEN_INFO.width != w) {
                 SCREEN_INFO.width = w
