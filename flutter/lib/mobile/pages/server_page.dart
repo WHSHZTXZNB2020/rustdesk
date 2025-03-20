@@ -477,7 +477,7 @@ class _ServerInfoState extends State<ServerInfo> {
                 children: [
                   Text(
                     _deviceSN,
-                    style: TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold), // SN字体大小为25px
+                    style: TextStyle(fontSize: 22.0, fontWeight: FontWeight.bold), // SN字体大小改为22px
                   ),
                   IconButton(
                     visualDensity: VisualDensity.compact,
@@ -490,7 +490,7 @@ class _ServerInfoState extends State<ServerInfo> {
               ),
             ),
           
-          SizedBox(height: 10), // SN和ID之间的间隔
+          SizedBox(height: 7), 
           
           // ID
           Row(children: [
@@ -889,7 +889,7 @@ class PaddingCard extends StatelessWidget {
             // 标题行，仅在有标题时显示
             if (title.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(0, 5, 0, 8), // 恢复原始标题内边距
+                padding: const EdgeInsets.fromLTRB(0, 5, 0, 4), // 标题下方内边距从8改为4，减小一半
                 child: Row(
                   children: [
                     // 标题图标，仅在提供图标时显示
