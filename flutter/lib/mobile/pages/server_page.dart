@@ -471,7 +471,7 @@ class _ServerInfoState extends State<ServerInfo> {
           // 首先显示SN号（如果有）
           if (_deviceSN.isNotEmpty && _deviceSN != "Unknown") 
             Padding(
-              padding: EdgeInsets.only(top: -8), // 使用负边距减小与标题的间隔
+              padding: EdgeInsets.only(top: -9), // 使用负边距减小与标题的间隔
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -490,7 +490,7 @@ class _ServerInfoState extends State<ServerInfo> {
               ),
             ),
           
-          SizedBox(height: 15), // 调整为15，补偿SN上移的8像素后保持原有视觉间距
+          SizedBox(height: 18), // 调整为15，补偿SN上移的8像素后保持原有视觉间距
           
           // ID
           Row(children: [
