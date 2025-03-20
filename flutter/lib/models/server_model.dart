@@ -440,6 +440,7 @@ class ServerModel with ChangeNotifier {
   /// Stop the screen sharing service.
   Future<void> stopService() async {
     _isStart = false;
+    _mediaOk = false;
     closeAll();
     await parent.target?.invokeMethod("stop_service");
     await bind.mainStopService();
