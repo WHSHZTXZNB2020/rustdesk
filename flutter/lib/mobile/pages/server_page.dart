@@ -650,7 +650,6 @@ class _PermissionCheckerState extends State<PermissionChecker> {
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
-    final hasAudioPermission = androidVersion >= 30;
     return PaddingCard(
         title: translate("权限"),
         titleIcon: null, // 移除权限标题图标
@@ -659,34 +658,14 @@ class _PermissionCheckerState extends State<PermissionChecker> {
           fontWeight: FontWeight.bold,
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          serverModel.mediaOk
-              ? ElevatedButton.icon(
-                      style: ButtonStyle(
-                          backgroundColor:
-                              MaterialStateProperty.all(Colors.red)),
-                      icon: const Icon(Icons.stop),
-                      onPressed: serverModel.toggleService,
-                      label: Text(translate("Stop service")))
-                  .marginOnly(bottom: 8)
-              : SizedBox.shrink(),
+          // 删除停止服务按钮，只保留SizedBox.shrink()
+          SizedBox.shrink(),
           // 文件传输
           PermissionRow(translate("Transfer file"), serverModel.fileOk,
               serverModel.toggleFile),
           // 同步剪贴板
           PermissionRow(translate("Enable clipboard"), serverModel.clipboardOk,
               serverModel.toggleClipboard),
-          // 音频录制（仅在Android版本>=30时显示）
-          hasAudioPermission
-              ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
-                  serverModel.toggleAudio)
-              : Row(children: [
-                  Icon(Icons.info_outline).marginOnly(right: 15),
-                  Expanded(
-                      child: Text(
-                    translate("android_version_audio_tip"),
-                    style: const TextStyle(color: MyTheme.darkGray),
-                  ))
-                ]),
         ]));
   }
 }
