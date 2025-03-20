@@ -101,19 +101,10 @@ android {
         }
     }
     
-    // 添加splits配置，确保只分包这两种架构
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'armeabi-v7a', 'arm64-v8a'
-            universalApk true // 生成通用APK
-        }
-    }
-
-    // 禁用x86和x86_64架构的打包
+    // 使用packagingOptions而不是splits配置，这样不会干扰CI构建流程
     packagingOptions {
         jniLibs {
+            // 排除x86和x86_64架构的库文件
             excludes += ['**/x86/**.so', '**/x86_64/**.so']
         }
     }
