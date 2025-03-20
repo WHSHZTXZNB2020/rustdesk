@@ -76,11 +76,6 @@ android {
         targetSdkVersion 33
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
-        
-        // 恢复ndk过滤器配置，确保只构建这两种架构
-        ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a'
-        }
     }
 
     signingConfigs {
@@ -92,32 +87,12 @@ android {
       }
     }
 
-    // 添加splits配置，支持特定ABI的APK构建
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'armeabi-v7a', 'arm64-v8a'
-            universalApk true // 同时生成包含所有ABI的通用APK
-        }
-    }
-
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules'
-        }
-    }
-    
-    // 使用packagingOptions而不是splits配置，这样不会干扰CI构建流程
-    packagingOptions {
-        jniLibs {
-            // 排除x86和x86_64架构的库文件
-            excludes += ['**/x86/**.so', '**/x86_64/**.so']
         }
     }
 }
