@@ -93,7 +93,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
       FutureBuilder<Widget>(
-        future: Future.value(const Offstage()),
+        future: Future.value(
+            Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
         builder: (_, data) {
           if (data.hasData) {
             if (isIncomingOnly) {
