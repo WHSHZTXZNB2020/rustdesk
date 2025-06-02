@@ -1666,8 +1666,10 @@ pub fn add_recent_document(path: &str) {
 }
 
 pub fn is_installed() -> bool {
-    let (_, _, _, exe) = get_install_info();
-    std::fs::metadata(exe).is_ok()
+    let (_, path, _, _) = get_install_info();
+    // 检查rustdesk.exe是否存在
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path);
+    std::fs::metadata(rustdesk_exe).is_ok()
 }
 
 pub fn get_reg(name: &str) -> String {
@@ -3236,9 +3238,10 @@ pub fn is_msi_installed() -> std::io::Result<bool> {
 }
 
 pub fn is_cur_exe_the_installed() -> bool {
-    let (_, _, _, exe) = get_install_info();
-    // Check if is installed, because `exe` is the default path if is not installed.
-    if !std::fs::metadata(&exe).is_ok() {
+    let (_, path, _, _) = get_install_info();
+    // 检查rustdesk.exe是否存在
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path).to_lowercase();
+    if !std::fs::metadata(&rustdesk_exe).is_ok() {
         return false;
     }
     let mut path = std::env::current_exe().unwrap_or_default();
@@ -3246,7 +3249,7 @@ pub fn is_cur_exe_the_installed() -> bool {
         path = linked;
     }
     let path = path.to_string_lossy().to_lowercase();
-    path == exe.to_lowercase()
+    path == rustdesk_exe
 }
 
 #[cfg(not(target_pointer_width = "64"))]
