@@ -1496,6 +1496,7 @@ fn get_before_uninstall(kill_self: bool) -> String {
     sc delete {app_name}
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
+    taskkill /F /IM rustdesk.exe{filter}
     reg delete HKEY_CLASSES_ROOT\\.{ext} /f
     reg delete HKEY_CLASSES_ROOT\\{ext} /f
     netsh advfirewall firewall delete rule name=\"{app_name} Service\"
@@ -1533,6 +1534,7 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> String {
         }
     }
     let (subkey, path, start_menu, _) = get_install_info();
+    let app_name = crate::get_app_name();
     format!(
         "
     {before_uninstall}
@@ -1540,6 +1542,8 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> String {
     {uninstall_cert_cmd}
     reg delete {subkey} /f
     {uninstall_amyuni_idd}
+    if exist \"{path}\\rustdesk.exe\" del /f /q \"{path}\\rustdesk.exe\"
+    if exist \"{path}\\{app_name}.exe\" del /f /q \"{path}\\{app_name}.exe\"
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
@@ -1547,7 +1551,7 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> String {
     ",
         before_uninstall=get_before_uninstall(kill_self),
         uninstall_amyuni_idd=get_uninstall_amyuni_idd(),
-        app_name = crate::get_app_name(),
+        app_name = app_name,
     )
 }
 
