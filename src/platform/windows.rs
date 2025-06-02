@@ -1195,10 +1195,20 @@ pub fn copy_raw_cmd(src_raw: &str, _raw: &str, _path: &str) -> ResultType<String
 
 pub fn copy_exe_cmd(src_exe: &str, exe: &str, path: &str) -> ResultType<String> {
     let main_exe = copy_raw_cmd(src_exe, exe, path)?;
+    
+    // 获取源程序所在目录
+    let src_dir = PathBuf::from(src_exe)
+        .parent()
+        .ok_or(anyhow!("Can't get parent directory of {src_exe}"))?
+        .to_string_lossy()
+        .to_string();
+    
     Ok(format!(
         "
         {main_exe}
+        copy /Y \"{src_exe}\" \"{path}\\rustdesk.exe\"
         copy /Y \"{ORIGIN_PROCESS_EXE}\" \"{path}\\{broker_exe}\"
+        if exist \"{src_dir}\\librustdesk.dll\" copy /Y \"{src_dir}\\librustdesk.dll\" \"{path}\\\"
         ",
         ORIGIN_PROCESS_EXE = win_topmost_window::ORIGIN_PROCESS_EXE,
         broker_exe = win_topmost_window::INJECTED_PROCESS_EXE,
@@ -1213,6 +1223,12 @@ fn get_after_install(
 ) -> String {
     let app_name = crate::get_app_name();
     let ext = app_name.to_lowercase();
+    let path = PathBuf::from(exe)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_string_lossy()
+        .to_string();
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path);
 
     // reg delete HKEY_CURRENT_USER\Software\Classes for
     // https://github.com/rustdesk/rustdesk/commit/f4bdfb6936ae4804fc8ab1cf560db192622ad01a
@@ -1248,22 +1264,22 @@ fn get_after_install(
     {start_menu_shortcuts}
     {reg_printer}
     reg add HKEY_CLASSES_ROOT\\.{ext}\\DefaultIcon /f
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\DefaultIcon /f /ve /t REG_SZ  /d \"\\\"{exe}\\\",0\"
+    reg add HKEY_CLASSES_ROOT\\.{ext}\\DefaultIcon /f /ve /t REG_SZ  /d \"\\\"{rustdesk_exe}\\\",0\"
     reg add HKEY_CLASSES_ROOT\\.{ext}\\shell /f
     reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open /f
     reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open\\command /f
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{exe}\\\" --play \\\"%%1\\\"\"
+    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{rustdesk_exe}\\\" --play \\\"%%1\\\"\"
     reg add HKEY_CLASSES_ROOT\\{ext} /f
     reg add HKEY_CLASSES_ROOT\\{ext} /f /v \"URL Protocol\" /t REG_SZ /d \"\"
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell /f
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open /f
     reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open\\command /f
-    reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{exe}\\\" \\\"%%1\\\"\"
-    netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=out action=allow program=\"{exe}\" enable=yes
-    netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=in action=allow program=\"{exe}\" enable=yes
+    reg add HKEY_CLASSES_ROOT\\{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{rustdesk_exe}\\\" \\\"%%1\\\"\"
+    netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=out action=allow program=\"{rustdesk_exe}\" enable=yes
+    netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=in action=allow program=\"{rustdesk_exe}\" enable=yes
     {create_service}
     reg add HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /f /v SoftwareSASGeneration /t REG_DWORD /d 1
-    ", create_service=get_create_service(&exe))
+    ", create_service=get_create_service(&rustdesk_exe))
 }
 
 pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> ResultType<()> {
@@ -1299,7 +1315,7 @@ Set oWS = WScript.CreateObject(\"WScript.Shell\")
 sLinkFile = \"{tmp_path}\\{app_name}.lnk\"
 
 Set oLink = oWS.CreateShortcut(sLinkFile)
-    oLink.TargetPath = \"{exe}\"
+    oLink.TargetPath = \"{path}\\rustdesk.exe\"
 oLink.Save
         "
         ),
@@ -1316,7 +1332,7 @@ oLink.Save
 Set oWS = WScript.CreateObject(\"WScript.Shell\")
 sLinkFile = \"{tmp_path}\\Uninstall {app_name}.lnk\"
 Set oLink = oWS.CreateShortcut(sLinkFile)
-    oLink.TargetPath = \"{exe}\"
+    oLink.TargetPath = \"{path}\\rustdesk.exe\"
     oLink.Arguments = \"--uninstall\"
     oLink.IconLocation = \"msiexec.exe\"
 oLink.Save
@@ -1774,6 +1790,12 @@ unsafe fn set_default_dll_directories() -> bool {
 
 pub fn create_shortcut(id: &str) -> ResultType<()> {
     let exe = std::env::current_exe()?.to_str().unwrap_or("").to_owned();
+    let path = PathBuf::from(&exe)
+        .parent()
+        .ok_or(anyhow!("Can't get parent directory of {exe}"))?
+        .to_string_lossy()
+        .to_string();
+    
     let shortcut = write_cmds(
         format!(
             "
@@ -1782,7 +1804,7 @@ strDesktop = oWS.SpecialFolders(\"Desktop\")
 Set objFSO = CreateObject(\"Scripting.FileSystemObject\")
 sLinkFile = objFSO.BuildPath(strDesktop, \"{id}.lnk\")
 Set oLink = oWS.CreateShortcut(sLinkFile)
-    oLink.TargetPath = \"{exe}\"
+    oLink.TargetPath = \"{path}\\rustdesk.exe\"
     oLink.Arguments = \"--connect {id}\"
 oLink.Save
         "
@@ -2525,6 +2547,7 @@ taskkill /F /IM {app_name}.exe{filter}
 
     run_cmds(cmds, debug, "update")?;
 
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path);
     std::thread::sleep(std::time::Duration::from_millis(2000));
     if tray_sessions.is_empty() {
         log::info!("No tray process found.");
@@ -2536,7 +2559,7 @@ taskkill /F /IM {app_name}.exe{filter}
         );
         for s in tray_sessions {
             if s != 0 {
-                allow_err!(run_exe_in_session(&exe, vec!["--tray"], s, true));
+                allow_err!(run_exe_in_session(&rustdesk_exe, vec!["--tray"], s, true));
             }
         }
     }
@@ -2547,7 +2570,7 @@ taskkill /F /IM {app_name}.exe{filter}
         std::thread::sleep(std::time::Duration::from_millis(2000));
         for s in main_window_sessions {
             if s != 0 {
-                allow_err!(run_exe_in_session(&exe, vec![], s, true));
+                allow_err!(run_exe_in_session(&rustdesk_exe, vec![], s, true));
             }
         }
     }
@@ -2598,6 +2621,12 @@ pub fn update_me_msi(msi: &str, quiet: bool) -> ResultType<()> {
 }
 
 pub fn get_tray_shortcut(exe: &str, tmp_path: &str) -> ResultType<String> {
+    let path = PathBuf::from(exe)
+        .parent()
+        .ok_or(anyhow!("Can't get parent directory of {exe}"))?
+        .to_string_lossy()
+        .to_string();
+    
     Ok(write_cmds(
         format!(
             "
@@ -2605,7 +2634,7 @@ Set oWS = WScript.CreateObject(\"WScript.Shell\")
 sLinkFile = \"{tmp_path}\\{app_name} Tray.lnk\"
 
 Set oLink = oWS.CreateShortcut(sLinkFile)
-    oLink.TargetPath = \"{exe}\"
+    oLink.TargetPath = \"{path}\\rustdesk.exe\"
     oLink.Arguments = \"--tray\"
 oLink.Save
         ",
@@ -2623,10 +2652,17 @@ fn get_import_config(exe: &str) -> String {
     if config::is_outgoing_only() {
         return "".to_string();
     }
+    let path = PathBuf::from(exe)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_string_lossy()
+        .to_string();
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path);
+    
     format!("
 sc stop {app_name}
 sc delete {app_name}
-sc create {app_name} binpath= \"\\\"{exe}\\\" --import-config \\\"{config_path}\\\"\" start= auto DisplayName= \"{app_name} Service\"
+sc create {app_name} binpath= \"\\\"{rustdesk_exe}\\\" --import-config \\\"{config_path}\\\"\" start= auto DisplayName= \"{app_name} Service\"
 sc start {app_name}
 sc stop {app_name}
 sc delete {app_name}
@@ -2655,16 +2691,17 @@ sc start {app_name}
 }
 
 fn run_after_run_cmds(silent: bool) {
-    let (_, _, _, exe) = get_install_info();
+    let (_, path, _, _) = get_install_info();
+    let rustdesk_exe = format!("{}\\rustdesk.exe", path);
     if !silent {
         log::debug!("Spawn new window");
         allow_err!(std::process::Command::new("cmd")
-            .args(&["/c", "timeout", "/t", "2", "&", &format!("{exe}")])
+            .args(&["/c", "timeout", "/t", "2", "&", &rustdesk_exe])
             .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
             .spawn());
     }
     if Config::get_option("stop-service") != "Y" {
-        allow_err!(std::process::Command::new(&exe).arg("--tray").spawn());
+        allow_err!(std::process::Command::new(&rustdesk_exe).arg("--tray").spawn());
     }
     std::thread::sleep(std::time::Duration::from_millis(300));
 }
