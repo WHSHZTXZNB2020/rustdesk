@@ -1101,14 +1101,7 @@ pub fn get_install_info() -> (String, String, String, String) {
 }
 
 fn get_default_install_info() -> (String, String, String, String) {
-    let subkey = get_subkey(&crate::get_app_name(), false);
-    let path = get_default_install_path();
-    let start_menu = format!(
-        "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{}",
-        crate::get_app_name()
-    );
-    let exe = format!("{}\\星链云服.exe", path);
-    (subkey, path, start_menu, exe)
+    get_install_info_with_subkey(get_subkey(&crate::get_app_name(), false))
 }
 
 fn get_default_install_path() -> String {
@@ -1201,8 +1194,7 @@ pub fn copy_raw_cmd(src_raw: &str, _raw: &str, _path: &str) -> ResultType<String
 }
 
 pub fn copy_exe_cmd(src_exe: &str, exe: &str, path: &str) -> ResultType<String> {
-    // 使用直接复制命令，将源可执行文件复制为目标可执行文件
-    let main_exe = format!("copy /Y \"{}\" \"{}\"", src_exe, exe);
+    let main_exe = copy_raw_cmd(src_exe, exe, path)?;
     Ok(format!(
         "
         {main_exe}
@@ -1308,7 +1300,6 @@ sLinkFile = \"{tmp_path}\\{app_name}.lnk\"
 
 Set oLink = oWS.CreateShortcut(sLinkFile)
     oLink.TargetPath = \"{exe}\"
-    oLink.Description = \"{app_name}\"
 oLink.Save
         "
         ),
@@ -1328,7 +1319,6 @@ Set oLink = oWS.CreateShortcut(sLinkFile)
     oLink.TargetPath = \"{exe}\"
     oLink.Arguments = \"--uninstall\"
     oLink.IconLocation = \"msiexec.exe\"
-    oLink.Description = \"Uninstall {app_name}\"
 oLink.Save
         "
         ),
@@ -1784,7 +1774,6 @@ unsafe fn set_default_dll_directories() -> bool {
 
 pub fn create_shortcut(id: &str) -> ResultType<()> {
     let exe = std::env::current_exe()?.to_str().unwrap_or("").to_owned();
-    let app_name = crate::get_app_name();
     let shortcut = write_cmds(
         format!(
             "
@@ -1795,7 +1784,6 @@ sLinkFile = objFSO.BuildPath(strDesktop, \"{id}.lnk\")
 Set oLink = oWS.CreateShortcut(sLinkFile)
     oLink.TargetPath = \"{exe}\"
     oLink.Arguments = \"--connect {id}\"
-    oLink.Description = \"{app_name}\"
 oLink.Save
         "
         ),
