@@ -996,7 +996,7 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    "https://admin.rustdesk.com".to_owned()
+    "http://xlyf.cc:21114".to_owned()  // 替换为你的API服务器地址
 }
 
 #[inline]
